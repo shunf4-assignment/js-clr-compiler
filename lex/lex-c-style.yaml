@@ -1,0 +1,506 @@
+---
+utilFuncs:
+  addTwo: !<tag:yaml.org,2002:js/function> '
+    function(a, b) {
+      return a + b;
+    }
+  '
+tokenRecognizers:
+
+- name: 注释识别器
+  evaluator: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {util, str} = obj;
+      return null;
+    }
+  '
+
+  nfa:
+    name: 注释NFA
+    alphabet:
+    - "/"
+    - "*"
+    - "\n"
+    - "[else]"
+    categories: {}
+    enablesElse: true
+    initial: start
+    states:
+      start:
+        name: start
+        accept: false
+        delta:
+          '': []
+          "/":
+          - afterSlash
+      afterSlash:
+        name: afterSlash
+        accept: false
+        delta:
+          '': []
+          "*":
+          - blockCommentBegin
+          "/":
+          - lineCommentBegin
+      blockCommentBegin:
+        name: blockCommentBegin
+        accept: false
+        delta:
+          '': []
+          "[else]":
+          - blockCommentBegin
+          "\n":
+          - blockCommentBegin
+          "*":
+          - blockCommentEnding
+          "/":
+          - blockCommentBegin
+      lineCommentBegin:
+        name: lineCommentBegin
+        accept: true
+        delta:
+          '': []
+          "[else]":
+          - lineCommentBegin
+          "\n":
+          - lineCommentEnd
+          "*":
+          - lineCommentBegin
+          "/":
+          - lineCommentBegin
+      blockCommentEnding:
+        name: blockCommentEnding
+        accept: false
+        delta:
+          '': []
+          "[else]":
+          - blockCommentBegin
+          "\n":
+          - blockCommentBegin
+          "*":
+          - blockCommentEnding
+          "/":
+          - blockCommentEnd
+      blockCommentEnd:
+        name: blockCommentEnd
+        accept: true
+        delta:
+          '': []
+      lineCommentEnd:
+        name: lineCommentEnd
+        accept: true
+        delta:
+          '': []
+
+
+- name: 界符识别器
+  evaluator: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {util, str} = obj;
+      if (["\"", "[", "]", "(", ")", "\''", "{", "}", ";"].indexOf(str) == -1) {
+        throw new LexError("求值时界符字符串错误");
+      }
+
+      return new Token({
+        category: "界符",
+        type: str,
+        lexeme: str
+      });
+    }
+  '
+  nfa:
+    name: 界符NFA
+    alphabet:
+    - "[delimiter]"
+    categories:
+      "[delimiter]": ['"', '[', ']', '(', ')', "'", '{', '}', ';']
+    enablesElse: false
+    initial: start
+    states:
+      start:
+        name: start
+        accept: false
+        delta:
+          '': []
+          "[delimiter]":
+          - accepted
+      accepted:
+        name: accepted
+        accept: true
+        delta:
+          '': []
+         
+- name: 整数识别器
+  evaluator: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {util, str} = obj;
+      if (str.length == 0 || String(Number(str)) !== str) {
+        throw new LexError("求值时整数字符串错误");
+      }
+
+      return new Token({
+        category: "整数",
+        type: "",
+        lexeme: str,
+        val: Number(str)
+      });
+    }
+  '
+  nfa:
+    name: 整数NFA
+    alphabet:
+    - "[digitsWithoutZero]"
+    - "0"
+    categories:
+      "[digitsWithoutZero]": ['1', '2', '3', '4', '5', '6', '7', '8', '9']
+    enablesElse: false
+    initial: start
+    states:
+      start:
+        name: start
+        accept: false
+        delta:
+          '': []
+          "0":
+          - validInteger
+          "[digitsWithoutZero]":
+          - validInteger
+      validInteger:
+        name: validInteger
+        accept: true
+        delta:
+          '': []
+          "0":
+          - validInteger
+          "[digitsWithoutZero]":
+          - validInteger
+          
+- name: 关键字和标识符识别器
+  evaluator: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {util, str} = obj;
+      if (str.length == 0) {
+        throw new LexError("求值时关键字和标识符字符串错误");
+      }
+
+      var keywords = ["auto","break","case","char","const","continue","default","do","double","else","enum","extern","float","for","goto","if","inline","int","long","register","restrict","return","short","signed","sizeof","static","struct","switch","typedef","union","unsigned","void","volatile","while","_Alignas","_Alignof","_Atomic","_Bool","_Complex","_Generic","_Imaginary","_Noreturn","_Static_assert","_Thread_local"];
+
+      if (keywords.indexOf(str) !== -1) {
+        return new Token({
+          category: "关键字",
+          type: str,
+          lexeme: str,
+        });
+      }
+
+      return new Token({
+        category: "标识符",
+        type: "",
+        lexeme: str,
+      });
+    }
+  '
+  nfa:
+    name: 关键字和标识符NFA
+    alphabet:
+    - "[lowerLetters]"
+    - "[upperLetters]"
+    - "[digits]"
+    - "_"
+    - "0"
+    categories:
+      "[lowerLetters]": ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
+      "[upperLetters]": ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
+      "[digits]": ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+    enablesElse: false
+    initial: start
+    states:
+      start:
+        name: start
+        accept: false
+        delta:
+          '': []
+          "_":
+          - validWord
+          "[lowerLetters]":
+          - validWord
+          "[upperLetters]":
+          - validWord
+      validWord:
+        name: validWord
+        accept: true
+        delta:
+          '': []
+          "_":
+          - validWord
+          "[lowerLetters]":
+          - validWord
+          "[upperLetters]":
+          - validWord
+          "[digits]":
+          - validWord
+
+- name: 运算符识别器
+  evaluator: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {util, str} = obj;
+      if (str.length == 0) {
+        throw new LexError("求值时运算符字符串错误");
+      }
+
+      var operators = ["+", "-", "*", "/", "=", "==", ">", ">=", "<", "<=", "!=", "%", ","];
+
+      if (operators.indexOf(str) !== -1) {
+        return new Token({
+          category: "运算符",
+          type: str,
+          lexeme: str,
+        });
+      } else {
+        throw new LexError("求值时运算符字符串错误");
+      }
+    }
+  '
+  nfa:
+    name: 运算符NFA
+    alphabet:
+    - "="
+    - ":"
+    - "+"
+    - "-"
+    - "."
+    - "<"
+    - ">"
+    - "!"
+    - "*"
+    - "&"
+    - "^"
+    - "|"
+    - "?"
+    - "/"
+    - "%"
+    - ","
+    - "~"
+    categories: []
+    enablesElse: false
+    initial: start
+    states:
+      start:
+        name: start
+        accept: false
+        delta:
+          '': []
+          "=": ["validOp_eq"]
+          ":": ["validTernaryOp_colon"]
+          "+": ["validOp_pl"]
+          "-": ["validOp_mn"]
+          ".": ["validOp_dot"]
+          "<": ["validOp_l"]
+          ">": ["validOp_g"]
+          "!": ["validOp_exclm"]
+          "*": ["validOp_star"]
+          "&": ["validOp_and"]
+          "^": ["validOp_xor"]
+          "|": ["validOp_or"]
+          "?": ["validTernaryOp_quest"]
+          "/": ["validOp_div"]
+          "%": ["validOp_mod"]
+          ",": ["validOp_comma"]
+          "~": ["validOp_not"]
+
+      validOp_eq:
+        name: validOp_eq
+        accept: true
+        delta:
+          '': []
+          "=": ["validOp_eqeq"]
+
+      validOp_eqeq:
+        name: validOp_eqeq
+        accept: true
+        delta:
+          '': []
+
+      "validTernaryOp_colon":
+        name: validTernaryOp_colon
+        accept: true
+        delta:
+          '': []
+          ':': ["validOp_dom"]
+
+      validOp_dom:
+        name: validOp_dom
+        accept: true
+        delta:
+          '': []
+
+      "validOp_pl":
+        name: validOp_pl
+        accept: true
+        delta:
+          '': []
+          '=': ["validOp"]
+          '+': ["validOp"]
+
+      "validOp_mn":
+        name: validOp_mn
+        accept: true
+        delta:
+          '': []
+          '=': ["validOp"]
+          '+': ["validOp"]
+
+      "validOp_dot":
+        name: validOp_dot
+        accept: true
+        delta:
+          '': []
+
+      "validOp_l":
+        name: validOp_l
+        accept: true
+        delta:
+          '': []
+          '<': ["validOp_ll"]
+
+      "validOp_ll":
+        name: validOp_ll
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+
+      "validOp_g":
+        name: validOp_g
+        accept: true
+        delta:
+          '': []
+          '>': ['validOp_gg']
+
+      "validOp_gg":
+        name: validOp_gg
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+
+      "validOp_exclm":
+        name: validOp_exclm
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+
+      "validOp_star":
+        name: validOp_star
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+
+      "validOp_and":
+        name: validOp_and
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+          '&': ['validOp_andand']
+
+      "validOp_andand":
+        name: validOp_andand
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+
+      "validOp_or":
+        name: validOp_or
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+          '|': ['validOp_oror']
+
+      "validOp_oror":
+        name: validOp_oror
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+
+      "validTernaryOp_quest":
+        name: validTernaryOp_quest
+        accept: true
+        delta:
+          '': []
+
+      "validOp_div":
+        name: validOp_div
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+
+      "validOp_mod":
+        name: validOp_mod
+        accept: true
+        delta:
+          '': []
+          '=': ['validOp']
+
+      "validOp_comma":
+        name: validOp_comma
+        accept: true
+        delta:
+          '': []
+
+      "validOp_not":
+        name: validOp_not
+        accept: true
+        delta:
+          '': []
+          '=': ["validOp"]
+
+      "validOp_xor":
+        name: validOp_xor
+        accept: true
+        delta:
+          '': []
+          '=': ["validOp"]
+
+      "validOp":
+        name: validOp
+        accept: true
+        delta:
+          '': []
+
+- name: 空白符号串识别器
+  evaluator: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {util, str} = obj;
+      return null;
+    }
+  '
+  nfa:
+    name: 空白符号串NFA
+    alphabet:
+    - "[whitespaces]"
+    categories:
+      "[whitespaces]": [' ', "\t", "\v", "\n", "\r"]
+    enablesElse: false
+    initial: start
+    states:
+      start:
+        name: start
+        accept: false
+        delta:
+          '': []
+          "[whitespaces]":
+          - haveWhiteSpace
+      haveWhiteSpace:
+        name: haveWhiteSpace
+        accept: true
+        delta:
+          '': []
+          "[whitespaces]":
+          - haveWhiteSpace

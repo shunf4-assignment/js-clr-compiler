@@ -1,0 +1,253 @@
+---
+name: 类C文法
+
+# TOP 怎么表示?
+# 块作用域怎么处理?(建立在当前TOP上,以baseOffset作为基加上)
+# 记住, 当一个语句完成后(比如可以进入块作用域), 是不会有任何临时变量的
+
+auxObj:
+  instrs: []
+  symTables: [{ "name": "global", "baseOffset"}]
+  labelNo: 0
+  funTable: {}
+  glbDataOffset: 0
+  
+  argEnv: null
+  
+  newLabel: !<tag:yaml.org,2002:js/function> '
+    function() {
+      return "L" + labelNo++;
+    }
+  '
+
+  emitLabel: !<tag:yaml.org,2002:js/function> '
+    function(lbl) {
+      this.instrs.push(lbl + ":");
+    }
+  '
+
+  emitJ: !<tag:yaml.org,2002:js/function> '
+    function(lbl) {
+      this.instrs.push("J " + lbl);
+    }
+  '
+  
+  
+
+terminals:
+- void
+- 标识符
+- ";"
+- "("
+- ")"
+- int
+- "{"
+- "}"
+- "="
+- return
+- while
+- if
+- else
+- ">"
+- "<"
+- "<="
+- ">="
+- "=="
+- "!="
+- "+"
+- "-"
+- "*"
+- "/"
+- ","
+- 整数
+
+nonTerminals:
+- 程序
+- 声明串
+- 声明
+
+startSymbol: 程序
+
+productions:
+
+- left:
+  - [程序, P]
+  right:
+  - [跳转main动作, A]
+  - [声明串, DD]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+      tokens.P.finish = true;
+
+      if (!auxObj.funTable["main"]) {
+        throw TranslateError("没有 main() 函数");
+      }
+    }
+  '
+
+- left:
+  - [跳转main动作, A]
+  right: []
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+      auxObj.emitJ("main");
+    }
+  '
+
+- left:
+  - [声明串, DD]
+- right:
+  - [声明, D]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+    }
+  '
+
+- left:
+  - [声明串, DD1]
+- right:
+  - [声明, D]
+  - [声明串, DD2]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+    }
+  '
+
+- left:
+  - [声明, D]
+- right:
+  - [int, T]
+  - [标识符, ID]
+  - [;]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+      auxObj.symTables[0][tokens.ID.lexeme] = {
+        name: tokens.ID.lexeme,
+        type: tokens.T.lexeme,
+        offset: auxObj.glbDataOffset
+      };
+      auxObj.glbDataOffset += 4;
+    }
+  '
+
+- left:
+  - [声明, D]
+- right:
+  - [int, I]
+  - [标识符, ID]
+  - [函数声明, FD]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+    }
+  '
+
+- left:
+  - [函数声明, FD]
+- right:
+  - ["("]
+  - [形参, AG]
+  - [")"]
+  - [初始化函数动作, A]
+  - [语句块]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+    }
+  '
+
+- left:
+  - [初始化函数动作, A]
+- right: []
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj, lrStack} = obj;
+      let argsToken = lrStack[lrStack.length - 3];
+      let funIdToken = lrStack[lrStack.length - 5];
+      let funTypeToken = lrStack[lrStack.length - 6];
+      let label = auxObj.newLabel();
+
+      auxObj.funTable[funIdToken.lexeme] = {
+        name: funIdToken.lexeme,
+        type: funTypeToken.lexeme,
+        instr: instrs.length,
+        label: label,
+        argList: argsToken.argList;
+      };
+
+      auxObj.emitLabel(label);
+
+      auxObj.argEnv = argsToken.argEnv;
+
+    }
+  '
+
+- left:
+  - [形参, AG]
+- right:
+  - [参数列表, AL]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+      tokens.AG.argEnv = tokens.AL.argEnv;
+      tokens.AG.argList = tokens.AL.argList;
+    }
+  '
+
+- left:
+  - [形参, AG]
+- right:
+  - [void]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+      tokens.AG.argEnv = null;
+      tokens.AG.argList = [];
+    }
+  '
+
+- left:
+  - [参数列表, AL]
+- right:
+  - [参数, SAG]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+      tokens.AL.argList = [tokens.SAG.symDesc];
+      tokens.AL.argEnv = {tokens.SAG.symDesc.name: tokens.SAG.symDesc};
+    }
+  '
+
+- left:
+  - [参数列表, AL1]
+- right:
+  - [参数, SAG]
+  - [参数列表, AL2]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+      tokens.AL1.argList = [tokens.SAG.symDesc].concat(tokens.AL2.argList);
+      tokens.AL1.argEnv = Object.assign({tokens.SAG.symDesc.name: tokens.SAG.symDesc}, tokens.AL2.argEnv);
+    }
+  '
+
+- left:
+  - [参数, SAG]
+- right:
+  - [int, T]
+  - [标识符, ID]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+      tokens.SAG.symDesc = {
+        name: tokens.ID.lexeme,
+        type: tokens.T.lexeme,
+        offset: 4,
+      }
+    }
+  '

@@ -1,0 +1,21 @@
+{
+  "name": "compiler-principle-course-design",
+  "version": "1.0.0",
+  "description": "",
+  "main": "mainTest.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "iconv-lite": "^0.4.24",
+    "js-yaml": "^3.13.1",
+    "sleep": "^6.1.0",
+    "wait-for-stuff": "^1.4.0"
+  },
+  "devDependencies": {
+    "eslint": "^5.16.0",
+    "winston": "^3.2.1"
+  }
+}
