@@ -5,9 +5,26 @@ name: 类C文法
 # 块作用域怎么处理?(建立在当前TOP上,以baseOffset作为基加上)
 # 记住, 当一个语句完成后(比如可以进入块作用域), 是不会有任何临时变量的
 
+
+# 为符合 SYSTEM V MIPS 调用约定:
+# 被调用函数来操作堆栈.
+# 而被调用函数所用的局部变量内存大小只有在函数体分析完毕时才知道(每个内部块级变量都占用唯一的内存空间,顺次递增,不重叠),所以要针对所用内存大小做回填
+
+# 栈帧 = 局部变量(m个字)
+# + 用于对齐 8 字节的补白(0或1个字)
+# + 寄存器: (从栈底到栈顶, 16个字)
+#   v0, v1, s0, s1, s2, s3, s4, s5,s6, s7, kt0, kt1, gp, s8, sp, ra
+# + 为下一个函数调用准备的参数构造区(n个字,n至少为4,取决于该函数调用了哪些函数).
+
+# m和n的大小未知,所以只能在函数体分析完毕时知道函数栈帧大小, 进而回填到函数开头分配栈帧的指令. 又因n的大小未知, 每个变量的地址也只能是相对的, 要等n得出之后再整体加上n.
+
+# 因此,函数分配栈帧的指令需要回填,函数里所有对变量的使用需要回填.
+
+# ['lw', destRegister, {relative: 5, argOffset: [3], getValue:function(){return this.relative + this.argOffset[0]} }, '($sp)']
+
 auxObj:
   instrs: []
-  symTables: [{ "name": "global", "baseOffset"}]
+  symTables: [{ "global": true, "currOffset": 0, "symbols": {}}]
   labelNo: 0
   funTable: {}
   glbDataOffset: 0
@@ -219,7 +236,13 @@ productions:
     function(obj) {
       let {tokens, auxObj} = obj;
       tokens.AL.argList = [tokens.SAG.symDesc];
-      tokens.AL.argEnv = {tokens.SAG.symDesc.name: tokens.SAG.symDesc};
+      tokens.AL.argEnv = {
+        global: false,
+        currOffset: 0,
+        symbols: {tokens.SAG.symDesc.name: tokens.SAG.symDesc}
+      };
+      tokens.SAG.symDesc.offset = tokens.AL1.argEnv.currOffset;
+      tokens.AL1.argEnv.currOffset += 4;
     }
   '
 
@@ -232,7 +255,10 @@ productions:
     function(obj) {
       let {tokens, auxObj} = obj;
       tokens.AL1.argList = [tokens.SAG.symDesc].concat(tokens.AL2.argList);
-      tokens.AL1.argEnv = Object.assign({tokens.SAG.symDesc.name: tokens.SAG.symDesc}, tokens.AL2.argEnv);
+      tokens.AL1.argEnv = tokens.AL2.argEnv;  // 注意这里直接把右边参数列表的引用给了左边, 所以如果改了左边的 symbols, 右边的 symbols 会同时更改, 进而失去意义. 但是这个产生式结束后右边的 argEnv 已经没用了, 所以可以接受
+      Object.assign(tokens.AL1.argEnv.symbols, {tokens.SAG.symDesc.name: tokens.SAG.symDesc});
+      tokens.SAG.symDesc.offset = tokens.AL1.argEnv.currOffset;
+      tokens.AL1.argEnv.currOffset += 4;
     }
   '
 
@@ -247,7 +273,51 @@ productions:
       tokens.SAG.symDesc = {
         name: tokens.ID.lexeme,
         type: tokens.T.lexeme,
-        offset: 4,
+        offset: -1,
+      }
+    }
+  '
+
+- left:
+  - [语句块, B]
+- right:
+  - ["{"]
+  - [初始化语句块动作, A]
+  - [内部声明串, DL]
+  - [语句串, SL]
+  - ["}"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+
+      // 离开语句块动作
+      tokens.SAG.symDesc = {
+        name: tokens.ID.lexeme,
+        type: tokens.T.lexeme,
+        offset: -1,
+      }
+    }
+  '
+
+- left:
+  - [初始化语句块动作, A]
+- right: []
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {tokens, auxObj} = obj;
+
+      // 初始化语句块动作
+      if (auxObj.argEnv !== null) {
+        // 这是一个函数语句块, 要把它的参数环境(就是auxObj.argEnv)作为新symTable的基础
+        symTables.push(auxObj.argEnv);
+        auxObj.argEnv = null;
+      } else {
+        // 这是一个函数内语句块
+        symTables.push({
+          global: false,
+          currOffset: 0,
+          symbols: {}
+        });
       }
     }
   '
