@@ -149,6 +149,7 @@ class CLRTranslatorGenerator {
       states: states
     });
 
+    //logger.log('info', nfa.toString());
     let dfa = new DFA(nfa);
     dfa.validate();
     

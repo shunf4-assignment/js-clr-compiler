@@ -115,7 +115,7 @@ auxObj:
         result: "L" + this.labelNo++
       });
 
-      return labelQuad.result;
+      return labelQuad;
     }
   '
 

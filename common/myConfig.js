@@ -1,6 +1,9 @@
 module.exports = {
-  sourceFileName: "testsource2.txt",
+  sourceFileName: "testsource1.txt",
   asGBKInsteadOfUtf8: true,
+
+  lexerConfig: "lex/lex-c-style.yaml",
+  translatorConfig: "translate/grammar-c-style.yaml",
 
   consoleLevel: "notice",
   debugFileName: "debug.log",

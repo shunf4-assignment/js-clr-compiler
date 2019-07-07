@@ -3,7 +3,6 @@ const fs = require("fs");
 
 const yaml = require("js-yaml");
 const iconv = require('iconv-lite');
-const sleep = require('sleep');
 
 require("./common/const");
 
@@ -12,7 +11,7 @@ const logger = require("./log");
 
 const { Token } = require("./common/Token");
 const { LexerGenerator } = require("./lex/LexerGenerator");
-const { LexError, NoMoreTokenError, TranslateError } = require("./common/errors");
+const { LexError, TranslateError } = require("./common/errors");
 const { CLRTranslatorGenerator } = require("./translate/CLRTranslatorGenerator");
 
 const { SyncStreamEmitter } = require("./common/SyncStreamEmitter");
@@ -39,7 +38,7 @@ var syncSourceStreamEmitter = new SyncStreamEmitter(sourceDecodedStream, ["data"
 syncSourceStreamEmitter.ended = false;
 
 // 词法分析器的生成
-var lexerGenConfig = yaml.load(fs.readFileSync("lex/lex-c-style.yaml", "utf8"));
+var lexerGenConfig = yaml.load(fs.readFileSync(myConfig.lexerConfig, "utf8"));
 
 var lexerGen = new LexerGenerator();
 lexerGen.config = lexerGenConfig;
@@ -47,41 +46,15 @@ lexerGen.config = lexerGenConfig;
 var lexer = lexerGen.generate();
 lexer.getMoreChar = () => syncSourceStreamEmitter.readPartSync();
 
-// logger.notice("词法分析结果:");
-
-// for (;;) {
-//   let token;
-//   try {
-//     token = lexer.getNextToken();
-//   } catch (e) {
-//     if (e instanceof NoMoreTokenError) {
-//       break;
-//     } else throw e;
-//   }
-
-//   logger.notice(token.toLongString());
-// }
-
-// return;
-
-
 
 // 翻译器的生成
-var translatorGenConfig = yaml.load(fs.readFileSync("translate/grammar-c-style.yaml", "utf8"));
+var translatorGenConfig = yaml.load(fs.readFileSync(myConfig.translatorConfig, "utf8"));
 
 var translatorGen = new CLRTranslatorGenerator();
 translatorGen.config = translatorGenConfig;
 
-//logger.notice(translatorGen.grammar.toString());
-//logger.notice([...translatorGen.grammar.FIRSTOf(["跳转main动作","内部变量声明串","语句串"])].join(", "));
 var translator = translatorGen.generate();
 translator.lexer = lexer;
-
-// var t;
-// do {
-//   t = translator._takeToken();
-//   logger.notice(t.toLongString());
-// } while (t.toString() !== EOF);
 
 translator.analyze();
 
