@@ -3,6 +3,8 @@ const { DFAInvalidError }  = require("../common/errors");
 const { NFA }  = require("./NFA");
 const { tagSpecialChars } = require("../common/utils");
 
+const { dfaLog } = require("../common/myConfig");
+
 function eqSet(as, bs) {
   return as.size === bs.size && all(isIn(bs), as);
 }
@@ -20,6 +22,7 @@ function isIn(as) {
 
 class DFA extends NFA {
   constructor(/** @type{NFA} */nfa) {
+
     let copiedObj = {
       name: nfa.name + " (Determinized)",
       alphabet: nfa.alphabet,
@@ -34,11 +37,11 @@ class DFA extends NFA {
 
     this.currStateName = "";
     
-    logger.debug(`==== 开始将 NFA ${nfa.name} 转为 DFA ${this.name} ====`);
+    if (dfaLog) logger.debug(`==== 开始将 NFA ${nfa.name} 转为 DFA ${this.name} ====`);
     let initialClosure = new Set([nfa.states[nfa.initial]]);
     initialClosure = nfa.epsilonClosure(initialClosure);
 
-    logger.debug(`初始状态闭包: `);
+    if (dfaLog) logger.debug(`初始状态闭包: `);
 
     let tmpStrList = []
     let tmpStr;
@@ -47,9 +50,9 @@ class DFA extends NFA {
     }
 
     tmpStr = tmpStrList.join(", ")
-    logger.debug(tmpStr === "" ? "(空)" : tmpStr);
+    if (dfaLog) logger.debug(tmpStr === "" ? "(空)" : tmpStr);
 
-    let dfaInitial = this.StateClass.merge(initialClosure);
+    let dfaInitial = this.StateClass.merge(this.StateClass, initialClosure);
     dfaInitial.accept = this.StateClass.anyAccept(initialClosure);
 
     this.states[dfaInitial.name] = dfaInitial;
@@ -58,10 +61,10 @@ class DFA extends NFA {
 
     this.initial = dfaInitial.name;
 
-    logger.debug(`创建了新状态 ${stateNames.length - 1}: ${dfaInitial.name}, ${dfaInitial.accept ? "接受": "非接受"}`);
+    if (dfaLog) logger.debug(`创建了新状态 ${stateNames.length - 1}: ${dfaInitial.name}, ${dfaInitial.accept ? "接受": "非接受"}`);
 
     for (let i = 0; i < stateNames.length; i++) {
-      logger.debug(`现分析状态 ${stateNames[i]}`);
+      if (dfaLog) logger.debug(`现分析状态 ${stateNames[i]}`);
 
       for (let l of this.alphabet) {
         // 生成目标状态集合
@@ -74,7 +77,7 @@ class DFA extends NFA {
           }
         }
 
-        logger.debug(`状态 ${stateNames[i]} 经字母 ${tagSpecialChars(l)} 转移到状态:`);
+        if (dfaLog) logger.debug(`状态 ${stateNames[i]} 经字母 ${tagSpecialChars(l)} 转移到状态:`);
 
         tmpStrList = [];
         for (let s of destOrigStates) {
@@ -82,20 +85,20 @@ class DFA extends NFA {
         }
 
         tmpStr = tmpStrList.join(", ")
-        logger.debug(tmpStr === "" ? "(空)" : tmpStr);
+        if (dfaLog) logger.debug(tmpStr === "" ? "(空)" : tmpStr);
 
         ///
         destOrigStates = nfa.epsilonClosure(destOrigStates);
         ///
 
-        logger.debug(`状态 ${stateNames[i]} 经字母 ${tagSpecialChars(l)} 转移到状态 (epsilon-闭包后):`);
+        if (dfaLog) logger.debug(`状态 ${stateNames[i]} 经字母 ${tagSpecialChars(l)} 转移到状态 (ε-闭包后):`);
 
         tmpStrList = [];
         for (let s of destOrigStates) {
           tmpStrList.push(s.name);
         }
         tmpStr = tmpStrList.join(", ")
-        logger.debug(tmpStr === "" ? "(空)" : tmpStr);
+        if (dfaLog) logger.debug(tmpStr === "" ? "(空)" : tmpStr);
 
         ///
         let duplicate = false;
@@ -105,19 +108,19 @@ class DFA extends NFA {
           if (eqSet(sos, destOrigStates)) {
             duplicate = true;
             duplicatedStateName = stateNames[sosI];
-            logger.debug(`与状态 ${stateNames[sosI]} 重复`);
+            if (dfaLog) logger.debug(`与状态 ${stateNames[sosI]} 重复`);
             break;
           }
         }
 
         if (!duplicate) {
-          let newState = this.StateClass.merge(destOrigStates);
+          let newState = this.StateClass.merge(this.StateClass, destOrigStates);
           newState.accept = this.StateClass.anyAccept(destOrigStates);
           this.states[newState.name] = newState;
           stateNames.push(newState.name);
           stateOrigStates.push(destOrigStates);
 
-          logger.debug(`创建了新状态 ${stateNames.length - 1}: ${newState.name}, ${newState.accept ? "接受": "非接受"}`);
+          if (dfaLog) logger.debug(`创建了新状态 ${stateNames.length - 1}: ${newState.name}, ${newState.accept ? "接受": "非接受"}`);
 
           this.states[stateNames[i]].delta[l] = [newState.name];
         } else {
@@ -140,19 +143,19 @@ class DFA extends NFA {
   validate() {
     for (let sName in this.states) {
       if (sName == "_extraEmpty")
-        break;
+        continue;
 
       let s = this.states[sName];
       
       for (let l of this.alphabet) {
         if (!s.delta[l]) {
-          throw new DFAInvalidError(`状态 ${sName} 在读 ${l} 时不转移`);
+          throw new DFAInvalidError(`状态 ${sName} 在读 ${tagSpecialChars(l)} 时不转移`);
         }
       }
 
-      for (let l in s.delta) {
+      for (let l of this.alphabet) {
         if (s.delta[l].length != 1) {
-          throw new DFAInvalidError(`状态 ${sName} 在读 ${l} 时转移状态数不为 1`);
+          throw new DFAInvalidError(`状态 ${sName} 在读 ${tagSpecialChars(l)} 时转移状态数不为 1`);
         }
       }
     }

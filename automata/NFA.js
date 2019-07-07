@@ -1,5 +1,7 @@
-const { State, LRItemState }  = require("./states");
+const { State, CLRItemState }  = require("./states");
 const { DFAInvalidError }  = require("../common/errors");
+const { tagSpecialChars, tagSpecialChars2 } = require("../common/utils");
+
 
 class NFA {
   constructor(StateClass, obj) {
@@ -39,8 +41,8 @@ class NFA {
     
     for (;;) {
       for (let s of result) {
-        if (s['']) {
-          s[''].foreach((sName) => {
+        if (s.delta[""]) {
+          s.delta[""].forEach((sName) => {
             result.add(this.states[sName]);
           });
         }
@@ -54,7 +56,7 @@ class NFA {
    return result;
   }
 
-  printableStr() {
+  toString() {
     let str = "";
     str += "========= FA 打印 =========" + "\n";
     str += `名称: ${this.name}` + "\n";
@@ -71,19 +73,25 @@ class NFA {
         str += ", ";
       }
     }
-    str = str.substring(0, str.length - 2) + "\n";
+
+    if (this.alphabet.length)
+      str = str.substring(0, str.length - 2);
+    
+    str += `\n\n共有 ${Object.keys(this.states).length} 个状态\n`;
 
     for (let sName in this.states) {
       let s = this.states[sName];
-      str += (this.initial === sName ? "[初始]" : "") + "状态 " + sName + " : " + (s.accept ? "接受" : "非接受" ) + ". 转移函数:\n";
+      str += (this.initial === sName ? "[初始]" : "") + "状态 " + tagSpecialChars2(sName) + " : " + (s.accept ? "接受" : "非接受" ) + ". 转移函数:\n";
 
       for (let letter in s.delta) {
-        str += (letter === "" ? "(epsilon)" : letter) + " -> ";
+        str += "\t" +  (letter === "" ? "ε" : letter) + " -> ";
         for (let dest of s.delta[letter]) {
-          str += dest + ";"
+          str += tagSpecialChars2(dest) + ";"
         }
         str += "\n";
       }
+
+      str += "\n";
     }
 
     str += "是否通过检测?\n";

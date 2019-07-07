@@ -13,5 +13,6 @@
 
       // Enable word based suggestions
       "editor.wordBasedSuggestions": false
-    }
+    },
+    "yaml.customTags": ["<tag:yaml.org,2002:js/function>", "yaml.org,2002:js/function", "tag:yaml.org,2002:js/function"]
 }

@@ -1,4 +1,36 @@
 ---
+
+testAuxObj: 
+  data: 3
+  func: !<tag:yaml.org,2002:js/function> '
+    function() {
+      return (this.data++);
+    }
+  '
+
+  getFunc: !<tag:yaml.org,2002:js/function> '
+    function() {
+      let x = {data: 5};
+      return this.func.bind(x);
+    }
+  '
+
+  testObj: { "x": 1 }
+  testMethod: !<tag:yaml.org,2002:js/function> '
+    function() {
+      console.log(this.x++);
+    }
+  '
+
+  createObj: !<tag:yaml.org,2002:js/function> '
+    function() {
+      if (!this.testObj.testMethod) {
+        this.testObj.testMethod = this.testMethod;
+      }
+      return Object.create(this.testObj);
+    }
+  '
+
 utilFuncs:
   addTwo: !<tag:yaml.org,2002:js/function> '
     function(a, b) {
@@ -185,6 +217,8 @@ tokenRecognizers:
 
       var keywords = ["auto","break","case","char","const","continue","default","do","double","else","enum","extern","float","for","goto","if","inline","int","long","register","restrict","return","short","signed","sizeof","static","struct","switch","typedef","union","unsigned","void","volatile","while","_Alignas","_Alignof","_Atomic","_Bool","_Complex","_Generic","_Imaginary","_Noreturn","_Static_assert","_Thread_local"];
 
+      keywords = keywords.concat(["true", "false"]);
+
       if (keywords.indexOf(str) !== -1) {
         return new Token({
           category: "关键字",
@@ -248,7 +282,7 @@ tokenRecognizers:
         throw new LexError("求值时运算符字符串错误");
       }
 
-      var operators = ["+", "-", "*", "/", "=", "==", ">", ">=", "<", "<=", "!=", "%", ","];
+      var operators = ["+", "-", "*", "/", "=", "==", ">", ">=", "<", "<=", "!=", "%", ",", "||", "&&", "!"];
 
       if (operators.indexOf(str) !== -1) {
         return new Token({
@@ -362,6 +396,7 @@ tokenRecognizers:
         delta:
           '': []
           '<': ["validOp_ll"]
+          '=': ["validOp"]
 
       "validOp_ll":
         name: validOp_ll
@@ -376,6 +411,7 @@ tokenRecognizers:
         delta:
           '': []
           '>': ['validOp_gg']
+          '=': ["validOp"]
 
       "validOp_gg":
         name: validOp_gg

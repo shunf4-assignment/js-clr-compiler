@@ -26,6 +26,6 @@ node_modules/
 
 ~
 
-/testdata*
-
 /.vscode/ipch
+
+test.js

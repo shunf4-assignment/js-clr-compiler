@@ -12,6 +12,13 @@ class DFAInvalidError extends Error {
   }
 }
 
+class TranslateError extends Error {
+  constructor (message) {
+    super(message);
+    this.name = "TranslateError(翻译错误)";
+  }
+}
+
 class IOEnd extends Error {
   constructor (message) {
     super(message);
@@ -22,11 +29,12 @@ class IOEnd extends Error {
 class NoMoreTokenError extends Error {
   constructor (message) {
     super(message);
-    this.name = "NoMoreTokenError(没有更多 Token 了)";
+    this.name = "NoMoreTokenError(没有更多Token了)";
   }
 }
 
 module.exports.LexError = LexError;
 module.exports.DFAInvalidError = DFAInvalidError;
+module.exports.TranslateError = TranslateError;
 module.exports.IOEnd = IOEnd;
 module.exports.NoMoreTokenError = NoMoreTokenError;

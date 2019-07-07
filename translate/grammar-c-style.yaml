@@ -2,8 +2,8 @@
 name: 类C文法
 
 # TOP 怎么表示?
-# 块作用域怎么处理?(建立在当前TOP上,以baseOffset作为基加上)
-# 记住, 当一个语句完成后(比如可以进入块作用域), 是不会有任何临时变量的
+# 块作用域怎么处理?(建立在当前TOP上,以baseOffset作为基加上 -- 错!)
+# 当采用了 SYSTEM V MIPS 约定后, 只能是进入函数后为该函数所有块作用域分配空间, 并以符号表判断可访问性
 
 
 # 为符合 SYSTEM V MIPS 调用约定:
@@ -20,34 +20,220 @@ name: 类C文法
 
 # 因此,函数分配栈帧的指令需要回填,函数里所有对变量的使用需要回填.
 
-# ['lw', destRegister, {relative: 5, argOffset: [3], getValue:function(){return this.relative + this.argOffset[0]} }, '($sp)']
-
 auxObj:
-  instrs: []
+# 每重新开始分析一个源文件最好 reset 一次
+  quads: []
   symTables: [{ "global": true, "currOffset": 0, "symbols": {}}]
   labelNo: 0
+  tempNo: 0
   funTable: {}
   glbDataOffset: 0
+  currFunc: null
   
   argEnv: null
+
+  QuadruplePrototype:
+    op: ""
+    arg1: null
+    arg2: null
+    result: null
+
+    toString: !<tag:yaml.org,2002:js/function> '
+      function() {
+        let result = "";
+        result += this.result !== undefined && this.result !== null ? this.result.toString() : "?";
+        result += " ← ";
+        result += this.op + "\t";
+        result += this.arg1 !== undefined && this.arg1 !== null ? this.arg1.toString() + "\t" : "";
+        result += this.arg2 !== undefined && this.arg2 !== null ? this.arg2.toString() + "\t" : "";
+
+        return result;
+      }
+    '
+
+  AddressPrototype:
+    type: ""  # global, bp(relative to $sp-frameSize), sp(relative to $sp), temp, register
+    value: 0  # for temp: index of tempvar; otherwise: offset
+
+    toString: !<tag:yaml.org,2002:js/function> '
+      function() {
+        let result = "{";
+        result += this.type;
+        result += " ";
+        if (typeof(this.value) === "string") {
+          result += `"${this.value}"`;
+        } else {
+          result += this.value;
+        }
+        result += "}";
+
+        return result;
+      }
+    '
+
+  makeQuad: !<tag:yaml.org,2002:js/function> '
+    function(sprout) {
+      if (!this.QuadruplePrototype.backpatch) {
+      }
+    
+      let ret = Object.create(this.QuadruplePrototype);
+      if (sprout) {
+        Object.assign(ret, sprout);
+      }
+
+      return ret;
+    }
+  '
+
+  makeAddr: !<tag:yaml.org,2002:js/function> '
+    function(type, value) {
+      let ret = Object.create(this.AddressPrototype);
+      ret.type = type;
+      ret.value = value;
+      return ret;
+    }
+  '
+
+  newTempAddr: !<tag:yaml.org,2002:js/function> '
+    function() {
+      return this.makeAddr("temp", this.tempNo++);
+    }
+  '
+
+  symTablesTop: !<tag:yaml.org,2002:js/function> '
+    function() {
+      return this.symTables[this.symTables.length - 1];
+    }
+  '
   
   newLabel: !<tag:yaml.org,2002:js/function> '
     function() {
-      return "L" + labelNo++;
+      /* return "L" + this.labelNo++; */
+      /* return ["LABEL", this.labelNo++]; */
+      let labelQuad = this.makeQuad({
+        op: "LABEL",
+        result: "L" + this.labelNo++
+      });
+
+      return labelQuad.result;
+    }
+  '
+
+  makeLabel: !<tag:yaml.org,2002:js/function> '
+    function(labelName) {
+      return this.makeQuad({
+        op: "LABEL",
+        result: labelName
+      });
     }
   '
 
   emitLabel: !<tag:yaml.org,2002:js/function> '
     function(lbl) {
-      this.instrs.push(lbl + ":");
+      /* this.quads.push(lbl + ":"); */
+      this.quads.push(lbl);
     }
   '
 
   emitJ: !<tag:yaml.org,2002:js/function> '
-    function(lbl) {
-      this.instrs.push("J " + lbl);
+    function(lblOrQuadNo) {
+      /* this.quads.push("J " + lbl); */
+      /* this.quads.push(["JUMP", lbl]); */
+
+      /*  lblOrQuadNo 如果是 label 就是字符串, 如果是四元式序号那就是数字 */
+      let quad = this.makeQuad({
+        op: "JUMP",
+        result: lblOrQuadNo
+      });
+      this.quads.push(quad);
+      return quad;
     }
   '
+
+  emit: !<tag:yaml.org,2002:js/function> '
+    function(sprout) {
+      let thisQuad = this.makeQuad(sprout);
+      this.quads.push(thisQuad);
+      return thisQuad;
+    }
+  '
+
+  backpatch: !<tag:yaml.org,2002:js/function> '
+    function(quadlist, quadNo) {
+      for (let quad of quadlist) {
+        if (!this.QuadruplePrototype.isPrototypeOf(quad)) {
+          throw new Error("this \"quad\" is not a quad");
+        }
+        if (quad.op !== "JUMP" && !(quad.op.slice(0, 2) === "IF" && quad.op.substring(quad.op.length - 1) === "J")) {
+          throw new Error("this quad is not a JUMP quad");
+        }
+
+        quad.result = quadNo;
+      }
+    }
+  '
+
+  findSymbol: !<tag:yaml.org,2002:js/function> '
+    function(symbolStr) {
+      let symTableInd = this.symTables.length - 1;
+      for (; symTableInd >= 0; symTableInd--) {
+        let currSymTable = this.symTables[symTableInd];
+        if (currSymTable.symbols[symbolStr]) {
+          return this.makeAddr(currSymTable.global ? "global" : "bp", currSymTable.symbols[symbolStr].offset);  
+        }
+      }
+
+      throw new TranslateError(`在符号表中找不到 ${symbolStr}.`);
+    }
+  '
+
+  boolize: !<tag:yaml.org,2002:js/function> '
+    function(symbol) {
+      if (symbol.truelist === undefined) {
+        this.emit({
+          op: "IF!=J",
+          arg1: symbol.addr,
+          arg2: 0,
+          result: "to_be_filled"
+        });
+        this.emitJ("to_be_filled");
+
+        symbol.truelist = [this.quads[this.quads.length - 2]];
+        symbol.falselist = [this.quads[this.quads.length - 1]];
+
+        symbol.addr = undefined;
+      }
+    }
+  '
+
+  exprize: !<tag:yaml.org,2002:js/function> '
+    function(symbol) {
+      if (symbol.addr === undefined) {
+        symbol.addr = this.newTempAddr();
+        this.emit({
+          op: "=",
+          result: symbol.addr,
+          arg1: 1
+        });
+
+        this.emitJ(this.quads.length + 2);
+
+        this.emit({
+          op: "=",
+          result: symbol.addr,
+          arg1: 0
+        });
+
+        this.backpatch(symbol.truelist, this.quads.length - 3);
+        this.backpatch(symbol.falselist, this.quads.length - 1);
+
+        symbol.truelist = undefined;
+        symbol.falselist = undefined;
+      }
+    }
+  '
+
+  
   
   
 
@@ -76,12 +262,16 @@ terminals:
 - "*"
 - "/"
 - ","
+- "||"
+- "&&"
+- "!"
+- "true"
+- "false"
 - 整数
 
-nonTerminals:
-- 程序
-- 声明串
-- 声明
+# 程序里可以自动补全, 这里就不写了
+nonTerminals: []
+
 
 startSymbol: 程序
 
@@ -94,12 +284,16 @@ productions:
   - [声明串, DD]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
-      tokens.P.finish = true;
+      let {symbols, auxObj} = obj;
+      symbols.P.finish = true;
 
       if (!auxObj.funTable["main"]) {
-        throw TranslateError("没有 main() 函数");
+        throw new TranslateError("没有 main() 函数");
       }
+
+      symbols.P.labelSize = auxObj.labelNo;
+      symbols.P.tempSize = auxObj.tempNo;
+      symbols.P.glbDataSize = auxObj.glbDataOffset;
     }
   '
 
@@ -108,44 +302,53 @@ productions:
   right: []
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
+      let {symbols, auxObj} = obj;
       auxObj.emitJ("main");
     }
   '
 
 - left:
   - [声明串, DD]
-- right:
+  right:
   - [声明, D]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
+      let {symbols, auxObj} = obj;
     }
   '
 
 - left:
   - [声明串, DD1]
-- right:
+  right:
   - [声明, D]
   - [声明串, DD2]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
+      let {symbols, auxObj} = obj;
     }
   '
 
 - left:
   - [声明, D]
-- right:
-  - [int, T]
+  right:
+  - [声明类型, T]
   - [标识符, ID]
   - [;]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
-      auxObj.symTables[0][tokens.ID.lexeme] = {
-        name: tokens.ID.lexeme,
-        type: tokens.T.lexeme,
+      let {symbols, auxObj} = obj;
+
+      if (symbols.T.passedLexeme === "void") {
+        throw new TranslateError(`不允许把 ${symbols.ID.lexeme} 声明为 void 类型`);
+      }
+
+      if (auxObj.symTables[0].symbols[symbols.ID.lexeme]) {
+        throw new TranslateError(`重声明: ${symbols.ID.lexeme}`);
+      }
+
+      auxObj.symTables[0].symbols[symbols.ID.lexeme] = {
+        name: symbols.ID.lexeme,
+        type: symbols.T.passedLexeme,
         offset: auxObj.glbDataOffset
       };
       auxObj.glbDataOffset += 4;
@@ -154,125 +357,299 @@ productions:
 
 - left:
   - [声明, D]
-- right:
-  - [int, I]
+  right:
+  - [声明类型, T]
   - [标识符, ID]
-  - [函数声明, FD]
-  action: !<tag:yaml.org,2002:js/function> '
-    function(obj) {
-      let {tokens, auxObj} = obj;
-    }
-  '
-
-- left:
-  - [函数声明, FD]
-- right:
   - ["("]
   - [形参, AG]
   - [")"]
   - [初始化函数动作, A]
-  - [语句块]
+  - [语句块, B]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
+      let {symbols, auxObj} = obj;
+
+      /*  函数分析完毕时的动作 */
+
+      /*  必须把函数块的 nextlist 给补上 */
+      auxObj.backpatch(symbols.B.nextlist, auxObj.quads.length);
+
+      /*  发射 return 有关指令 */
+
+      /* 我们在这不检查 int () 函数是否曾使用 return 返回一个值了. 当用户没有返回值时, 该函数调用的返回值为未定义 */
+
+      /*  弹出栈帧 */
+      let popFrameOp = {
+        op: "+",
+        result: auxObj.makeAddr("register", "sp"),
+        arg1: auxObj.makeAddr("register", "sp"),
+        arg2: "stack_frame_size_to_be_filled"
+      };
+    
+      popFrameOp = auxObj.emit(popFrameOp);
+
+      auxObj.currFunc.fillFrameSize.push(popFrameOp);
+
+      /*  恢复 Return Addr 到寄存器 */
+      let restoreRAOp = {
+        op: "=",
+        result: auxObj.makeAddr("register", "ra"),
+        arg1: "return_address_offset_to_be_filled"
+      };
+
+      restoreRAOp = auxObj.emit(restoreRAOp);
+
+      auxObj.currFunc.fillReturnAddr.push(restoreRAOp);
+
+      /*  返回 */
+      auxObj.emit({
+        op: "JUMP",
+        result: auxObj.makeAddr("register", "ra")
+      });
+
+
+
+      /*  回填 frameSize(栈帧大小, 函数开始声明四元式 FUN_START 用), returnAddrAddr(用来指示 returnAddr 在内存的存放地址) */
+
+      let frameSize = auxObj.currFunc.localVarSize + (auxObj.currFunc.localVarSize / 4 % 2 * 4) + 4 + Math.max(auxObj.currFunc.maxSubArgSize, 4) * 4;
+
+      auxObj.currFunc.fillFrameSize.forEach((op) => {
+        if (op.result === "stack_frame_size_to_be_filled") {
+          op.result = frameSize;
+        } else if (op.arg1 === "stack_frame_size_to_be_filled") {
+          op.arg1 = frameSize;
+        } else if (op.arg2 === "stack_frame_size_to_be_filled") {
+          op.arg2 = frameSize;
+        } else {
+          throw new TranslateError("回填栈帧大小时出错");
+        }
+      });
+      
+      let returnAddrAddr = auxObj.makeAddr("bp", auxObj.currFunc.localVarSize + (auxObj.currFunc.localVarSize / 4 % 2 * 4) + 4);
+      auxObj.currFunc.fillReturnAddr.forEach((op) => {
+        if (op.result === "return_address_offset_to_be_filled") {
+          op.result = returnAddrAddr;
+        } else if (op.arg1 === "return_address_offset_to_be_filled") {
+          op.arg1 = returnAddrAddr;
+        } else if (op.arg2 === "return_address_offset_to_be_filled") {
+          op.arg2 = returnAddrAddr;
+        } else {
+          throw new TranslateError("回填栈帧 RA 位置时出错");
+        }
+      });
+
+      /* let funcEndOp = { */
+      /*   op: "FUN_END", */
+      /*   arg1: frameSize, */
+      /* }; */
+
+      auxObj.currFunc = null;
+    }
+  '
+
+- left:
+  - [声明类型, T]
+  right:
+  - [int, I]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.T.passedLexeme = symbols.I.lexeme;
+    }
+  '
+
+- left:
+  - [声明类型, T]
+  right:
+  - [void, V]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.T.passedLexeme = symbols.V.lexeme;
     }
   '
 
 - left:
   - [初始化函数动作, A]
-- right: []
+  right: []
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj, lrStack} = obj;
-      let argsToken = lrStack[lrStack.length - 3];
-      let funIdToken = lrStack[lrStack.length - 5];
-      let funTypeToken = lrStack[lrStack.length - 6];
+      let {symbols, auxObj, lrStack} = obj;
+      let argsSymbol = lrStack[lrStack.length - 2];   /*  指上面那个函数声明产生式右边的"形参" */
+      let funIdSymbol = lrStack[lrStack.length - 4];  /*  指上面的上面那个声明产生式右边的"标识符" */
+      let funTypeSymbol = lrStack[lrStack.length - 5];/*  指上面的上面那个声明产生式右边的"函数返回值类型" */
+
       let label = auxObj.newLabel();
 
-      auxObj.funTable[funIdToken.lexeme] = {
-        name: funIdToken.lexeme,
-        type: funTypeToken.lexeme,
-        instr: instrs.length,
+      if (auxObj.funTable[funIdSymbol.lexeme]) {
+        throw new TranslateError(`重载了函数 ${funIdSymbol.lexeme}`);
+      }
+
+      /*  argList: symDesc 类型的数组, 按参数从左到右顺序排 */
+      /*  argEnv: 一个字典, 与 symTables 内元素的构造完全一致. argEnv.symbols 也是值为 symDesc 的字典 */
+
+      auxObj.currFunc = {
+        name: funIdSymbol.lexeme,
+        type: funTypeSymbol.passedLexeme,
+        quadNo: auxObj.quads.length,
         label: label,
-        argList: argsToken.argList;
+        argList: argsSymbol.argList,
+        localVarSize: 0, /*  这个 localVar 不算形参 */
+        maxSubArgSize: 0,
+        fillFrameSize: [],
+        fillReturnAddr: []
       };
+
+      auxObj.funTable[funIdSymbol.lexeme] = auxObj.currFunc;
 
       auxObj.emitLabel(label);
 
-      auxObj.argEnv = argsToken.argEnv;
+      auxObj.emitLabel(auxObj.makeLabel(funIdSymbol.lexeme));
+
+      let funBeginOp = {
+        op: "FUN_BEGIN",
+        arg1: "stack_frame_size_to_be_filled",
+      };
+
+      funBeginOp = auxObj.emit(funBeginOp);
+
+      /*  PUSH 栈帧 */
+      let allocFrameOp = {
+        op: "-",
+        result: auxObj.makeAddr("register", "sp"),
+        arg1: auxObj.makeAddr("register", "sp"),
+        arg2: "stack_frame_size_to_be_filled",
+      };
+
+      allocFrameOp = auxObj.emit(allocFrameOp);
+
+      /*  根据 MIPS 的 Convention, 把四个参数寄存器的值放入内存 */
+      auxObj.emit({
+        op: "=",
+        result: auxObj.makeAddr("bp", 0),
+        arg1: auxObj.makeAddr("register", "a0"),
+      });
+
+      auxObj.emit({
+        op: "=",
+        result: auxObj.makeAddr("bp", -4),
+        arg1: auxObj.makeAddr("register", "a1"),
+      });
+
+      auxObj.emit({
+        op: "=",
+        result: auxObj.makeAddr("bp", -8),
+        arg1: auxObj.makeAddr("register", "a2"),
+      });
+
+      auxObj.emit({
+        op: "=",
+        result: auxObj.makeAddr("bp", -12),
+        arg1: auxObj.makeAddr("register", "a3"),
+      });
+
+      auxObj.argEnv = argsSymbol.argEnv;
+
+      if (auxObj.argEnv)
+        auxObj.argEnv.currOffset = 4;   /*  指向本栈帧的第一个字; 这个 argEnv 将来是要被作为新的 symTable 的. */
+
+      /*  根据 MIPS 的 Convention, 把 Return Addr 从寄存器存入内存地址 */
+
+      let returnAddrOp = {
+        op: "=",
+        result: "return_address_offset_to_be_filled",
+        arg1: auxObj.makeAddr("register", "ra"),
+      };
+      returnAddrOp = auxObj.emit(returnAddrOp);
+
+      auxObj.currFunc.fillFrameSize = [funBeginOp, allocFrameOp];
+      auxObj.currFunc.fillReturnAddr = [returnAddrOp];
 
     }
   '
 
 - left:
   - [形参, AG]
-- right:
-  - [参数列表, AL]
+  right:
+  - [形参列表, AL]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
-      tokens.AG.argEnv = tokens.AL.argEnv;
-      tokens.AG.argList = tokens.AL.argList;
+      let {symbols, auxObj} = obj;
+      symbols.AG.argEnv = symbols.AL.argEnv;
+      symbols.AG.argList = symbols.AL.argList;
     }
   '
 
 - left:
   - [形参, AG]
-- right:
+  right:
   - [void]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
-      tokens.AG.argEnv = null;
-      tokens.AG.argList = [];
+      let {symbols, auxObj} = obj;
+      symbols.AG.argEnv = null;
+      symbols.AG.argList = [];
     }
   '
 
 - left:
-  - [参数列表, AL]
-- right:
-  - [参数, SAG]
+  - [形参列表, AL]
+  right:
+  - [具体形参, SAG]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
-      tokens.AL.argList = [tokens.SAG.symDesc];
-      tokens.AL.argEnv = {
+      let {symbols, auxObj} = obj;
+      symbols.AL.argList = [symbols.SAG.symDesc];
+      /*  我们把 (栈顶寄存器 $sp) 减去 (本函数栈帧大小 fsize) 的值 (正好指向本栈帧的前一个字) 的值作为虚拟的基址寄存器 BP, 作为相对地址的基础. 之后再用 $sp 和 fsize 的值回代, 算出相对于 $sp 的相对地址. MIPS 没有 BP 这一点确实不利于写编译器 */
+
+      /*  所以, 形参从左向右, 地址分别为 BP, BP-4, BP-8 ... */
+      symbols.AL.argEnv = {
         global: false,
         currOffset: 0,
-        symbols: {tokens.SAG.symDesc.name: tokens.SAG.symDesc}
+        symbols: {}
       };
-      tokens.SAG.symDesc.offset = tokens.AL1.argEnv.currOffset;
-      tokens.AL1.argEnv.currOffset += 4;
+      symbols.AL.argEnv[symbols.SAG.symDesc.name] = symbols.SAG.symDesc;
+      symbols.SAG.symDesc.offset = symbols.AL.argEnv.currOffset;
+
+      /*  注意, 计算形参地址时是递减 4. 在算局部变量时, 要重置 currOffset 为 4, 并在之后递增4. */
+      symbols.AL.argEnv.currOffset -= 4;
     }
   '
 
 - left:
-  - [参数列表, AL1]
-- right:
-  - [参数, SAG]
-  - [参数列表, AL2]
+  - [形参列表, AL1]
+  right:
+  - [形参列表, AL2]
+  - [","]
+  - [具体形参, SAG]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
-      tokens.AL1.argList = [tokens.SAG.symDesc].concat(tokens.AL2.argList);
-      tokens.AL1.argEnv = tokens.AL2.argEnv;  // 注意这里直接把右边参数列表的引用给了左边, 所以如果改了左边的 symbols, 右边的 symbols 会同时更改, 进而失去意义. 但是这个产生式结束后右边的 argEnv 已经没用了, 所以可以接受
-      Object.assign(tokens.AL1.argEnv.symbols, {tokens.SAG.symDesc.name: tokens.SAG.symDesc});
-      tokens.SAG.symDesc.offset = tokens.AL1.argEnv.currOffset;
-      tokens.AL1.argEnv.currOffset += 4;
+      let {symbols, auxObj} = obj;
+      symbols.AL1.argList = symbols.AL2.argList.concat([symbols.SAG.symDesc]);
+      symbols.AL1.argEnv = symbols.AL2.argEnv;  /*  注意这里直接把右边参数列表的引用给了左边, 所以如果改了左边的 symbols, 右边的 symbols 会同时更改, 进而失去意义. 但是这个产生式结束后右边的 argEnv 已经没用了, 所以可以接受 */
+
+      if (symbols.AL1.argEnv.symbols[symbols.SAG.symDesc.name]) {
+        throw new TranslateError(`形参 ${symbols.SAG.symDesc.name} 有重名`);
+      }
+      symbols.AL1.argEnv.symbols[symbols.SAG.symDesc.name] = symbols.SAG.symDesc;
+      symbols.SAG.symDesc.offset = symbols.AL1.argEnv.currOffset;
+      symbols.AL1.argEnv.currOffset -= 4;
     }
   '
 
 - left:
-  - [参数, SAG]
-- right:
+  - [具体形参, SAG]
+  right:
   - [int, T]
   - [标识符, ID]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
-      tokens.SAG.symDesc = {
-        name: tokens.ID.lexeme,
-        type: tokens.T.lexeme,
+      let {symbols, auxObj} = obj;
+      symbols.SAG.symDesc = {
+        name: symbols.ID.lexeme,
+        type: symbols.T.lexeme,
         offset: -1,
       }
     }
@@ -280,44 +657,989 @@ productions:
 
 - left:
   - [语句块, B]
-- right:
+  right:
   - ["{"]
   - [初始化语句块动作, A]
-  - [内部声明串, DL]
-  - [语句串, SL]
+  - [内部变量声明串或空]
+  - [语句串, SS]
   - ["}"]
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
+      let {symbols, auxObj} = obj;
 
-      // 离开语句块动作
-      tokens.SAG.symDesc = {
-        name: tokens.ID.lexeme,
-        type: tokens.T.lexeme,
-        offset: -1,
-      }
+      /*  离开语句块动作 */
+      symbols.B.nextlist = symbols.SS.nextlist;
+      auxObj.symTables.pop();
+      
     }
   '
 
 - left:
   - [初始化语句块动作, A]
-- right: []
+  right: []
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
-      let {tokens, auxObj} = obj;
+      let {symbols, auxObj} = obj;
 
-      // 初始化语句块动作
-      if (auxObj.argEnv !== null) {
-        // 这是一个函数语句块, 要把它的参数环境(就是auxObj.argEnv)作为新symTable的基础
-        symTables.push(auxObj.argEnv);
+      /*  初始化语句块动作 */
+      if (auxObj.argEnv) {
+        /*  这是一个函数语句块, 要把它的参数环境(就是auxObj.argEnv)作为新symTable的基础 */
+        auxObj.symTables.push(auxObj.argEnv);
+        /*  在初始化函数动作中已经把 currOffset 重置为 4 了. 这里不用做 */
+        /*  用过一次 argEnv 后要马上置空, 以便函数内部语句块的分析 */
         auxObj.argEnv = null;
       } else {
-        // 这是一个函数内语句块
-        symTables.push({
+        /*  这是一个函数内语句块(或该函数没有参数) */
+        auxObj.symTables.push({
           global: false,
-          currOffset: 0,
+          currOffset: 4,
           symbols: {}
         });
       }
+    }
+  '
+
+- left:
+  - [内部变量声明串或空]
+  right: []
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+      
+    }
+  '
+
+- left:
+  - [内部变量声明串或空]
+  right:
+  - [内部变量声明串]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+      
+    }
+  '
+
+- left:
+  - [内部变量声明串, DS1]
+  right:
+  - [内部变量声明, D]
+  - [内部变量声明串, DS2]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+      
+    }
+  '
+
+- left:
+  - [内部变量声明串, DS]
+  right:
+  - [内部变量声明, D]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+      
+    }
+  '
+
+- left:
+  - [内部变量声明, D]
+  right:
+  - [int, T]
+  - [标识符, ID]
+  - [;]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+      
+      let symDesc = {
+        name: symbols.ID.lexeme,
+        type: symbols.T.lexeme,
+        /* offset: auxObj.symTablesTop().currOffset */
+        offset: auxObj.currFunc.localVarSize
+      };
+      if (auxObj.symTablesTop().symbols[symDesc.name]) {
+        throw new TranslateError(`重定义了变量 ${symDesc.name}`);
+      }
+
+      /*  我们不打算做对于用户定义局部变量的优化. 所以这里写死每个局部变量的 offset */
+
+      auxObj.symTablesTop().symbols[symDesc.name] = symDesc;
+      auxObj.currFunc.localVarSize += 4;
+      auxObj.symTablesTop().currOffset += 4;
+    }
+  '
+
+- left:
+  - [语句串, SS1]
+  right:
+  - [语句, S]
+  - [记录下一指令编号动作, M]
+  - [语句串, SS2]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.backpatch(symbols.S.nextlist, symbols.M.quadNo);
+
+      /*  实际这里传递的 nextlist 只含有最后一个语句的 nextlist */
+      symbols.SS1.nextlist = symbols.SS2.nextlist;
+    }
+  '
+  
+- left:
+  - [语句串, SS]
+  right:
+  - [语句, S]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.SS.nextlist = symbols.S.nextlist;
+    }
+  '
+
+- left:
+  - [语句, S]
+  right:
+  - [语句块, B]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+      symbols.S.nextlist = symbols.B.nextlist;
+    }
+  '
+
+- left:
+  - [语句, S]
+  right:
+  - [标识符, ID]
+  - ["="]
+  - [或级表达式, E]
+  - [";"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.exprize(symbols.E);
+
+      auxObj.emit({
+        op: "=",
+        result: auxObj.findSymbol(symbols.ID.lexeme),
+        arg1: symbols.E.addr
+      });
+
+      symbols.S.nextlist = [];
+    }
+  '
+
+- left:
+  - [语句, S]
+  right:
+  - [return]
+  - [或级表达式, E]
+  - [";"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      if (auxObj.currFunc.type === "void") {
+        throw new TranslateError("在返回类型为 void 的函数体内返回表达式");
+      }
+
+      auxObj.exprize(symbols.E);
+
+      auxObj.emit({
+        op: "=",
+        result: auxObj.makeAddr("register", "v0"),
+        arg1: symbols.E.addr
+      });
+
+      /*  弹出栈帧 */
+      let popFrameOp = {
+        op: "+",
+        result: auxObj.makeAddr("register", "sp"),
+        arg1: auxObj.makeAddr("register", "sp"),
+        arg2: "stack_frame_size_to_be_filled"
+      };
+    
+      popFrameOp = auxObj.emit(popFrameOp);
+
+      auxObj.currFunc.fillFrameSize.push(popFrameOp);
+
+      /*  恢复 Return Addr 到寄存器 */
+      let restoreRAOp = {
+        op: "=",
+        result: auxObj.makeAddr("register", "ra"),
+        arg1: "return_address_offset_to_be_filled"
+      };
+
+      restoreRAOp = auxObj.emit(restoreRAOp);
+
+      auxObj.currFunc.fillReturnAddr.push(restoreRAOp);
+
+      /*  返回 */
+      auxObj.emit({
+        op: "JUMP",
+        result: auxObj.makeAddr("register", "ra")
+      });
+
+      symbols.S.nextlist = [];
+    }
+  '
+
+- left:
+  - [语句, S]
+  right:
+  - [return]
+  - [";"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      if (auxObj.currFunc.type !== "void") {
+        throw new TranslateError("在返回类型非 void 的函数体内返回空");
+      }
+
+      /*  弹出栈帧 */
+      let popFrameOp = {
+        op: "+",
+        result: auxObj.makeAddr("register", "sp"),
+        arg1: auxObj.makeAddr("register", "sp"),
+        arg2: "stack_frame_size_to_be_filled"
+      };
+    
+      popFrameOp = auxObj.emit(popFrameOp);
+
+      auxObj.currFunc.fillFrameSize.push(popFrameOp);
+
+      /*  恢复 Return Addr 到寄存器 */
+      let restoreRAOp = {
+        op: "=",
+        result: auxObj.makeAddr("register", "ra"),
+        arg1: "return_address_offset_to_be_filled"
+      };
+
+      restoreRAOp = auxObj.emit(restoreRAOp);
+
+      auxObj.currFunc.fillReturnAddr.push(restoreRAOp);
+
+      /*  返回 */
+      auxObj.emit({
+        op: "JUMP",
+        result: auxObj.makeAddr("register", "ra")
+      });
+
+      symbols.S.nextlist = [];
+    }
+  '
+
+- left:
+  - [表达式布尔化动作]
+  right: []
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj, lrStack} = obj;
+
+      auxObj.boolize(lrStack[lrStack.length - 1]);
+    }
+  '
+
+- left:
+  - [语句, S]
+  right:
+  - [while]
+  - [记录下一指令编号动作, M1]
+  - ["("]
+  - [或级表达式, B]
+  - [表达式布尔化动作, A]
+  - [")"]
+  - [记录下一指令编号动作, M2]
+  - [语句, S1]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.backpatch(symbols.S1.nextlist, symbols.M1.quadNo);
+      auxObj.backpatch(symbols.B.truelist, symbols.M2.quadNo);
+
+      symbols.S.nextlist = symbols.B.falselist;
+
+      auxObj.emitJ(symbols.M1.quadNo);
+
+    }
+  '
+
+- left:
+  - [语句, S]
+  right:
+  - [if]
+  - ["("]
+  - [或级表达式, B]
+  - [表达式布尔化动作, A]
+  - [")"]
+  - [记录下一指令编号动作, M]
+  - [语句, S1]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.backpatch(symbols.B.truelist, symbols.M.quadNo);
+
+      symbols.S.nextlist = symbols.B.falselist.concat(symbols.S1.nextlist);
+    }
+  '
+
+- left:
+  - [语句, S]
+  right:
+  - [if]
+  - ["("]
+  - [或级表达式, B]
+  - [表达式布尔化动作, A]
+  - [")"]
+  - [记录下一指令编号动作, M1]
+  - [语句, S1]
+  - [跳转待填地址动作, N]
+  - [else]
+  - [记录下一指令编号动作, M2]
+  - [语句, S2]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.backpatch(symbols.B.truelist, symbols.M1.quadNo);
+      auxObj.backpatch(symbols.B.falselist, symbols.M2.quadNo);
+
+      symbols.S.nextlist = symbols.S1.nextlist.concat(symbols.N.nextlist, symbols.S2.nextlist);
+    }
+  '
+
+- left:
+  - [语句, S]
+  right:
+  - [函数调用, FC]
+  - [";"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.S.nextlist = [];
+    }
+  '
+
+- left:
+  - [函数调用, FC]
+  right:
+  - [函数调用具体形式, C]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      /*  传参有关的四元式 */
+      for (let i = 0; i < symbols.C.argList.length; i++) {
+        /*  实际上是一系列表达式的 list */
+        let currArg = symbols.C.argList[i];
+        if (i < 4) {
+          auxObj.emit({
+            op: "=",
+            result: auxObj.makeAddr("register", "a" + i),   /*  开始放 a0 - a3 寄存器 */
+            arg1: currArg.addr
+          });
+        } else {
+          auxObj.emit({
+            op: "=",
+            result: auxObj.makeAddr("sp", i * 4),   /*  a4 及以上, 放内存 */
+            arg1: currArg.addr
+          });
+        }
+      }
+
+      auxObj.emit({
+        op: "JUMP_AND_LINK",
+        result: symbols.C.funLabel,
+        arg1: auxObj.makeAddr("register", "ra"),
+      });
+
+      /*  在跳转回来时, v0 寄存器应存返回值 */
+    }
+  '
+
+  
+
+- left:
+  - [函数调用具体形式, C]
+  right:
+  - [标识符, ID]
+  - ["("]
+  - [")"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      if (!auxObj.funTable[symbols.ID.lexeme]) {
+        throw new TranslateError(`没有 ${symbols.ID.lexeme}() 函数`);
+      }
+
+      symbols.C.funLabel = auxObj.funTable[symbols.ID.lexeme].label;
+      symbols.C.argList = [];
+      
+      if (auxObj.currFunc) {
+        auxObj.currFunc.maxSubArgSize = Math.max(auxObj.currFunc.maxSubArgSize, symbols.C.argList.length);
+      } else {
+        throw new TranslateError("没有在函数体内调用函数??");
+      }
+    }
+  '
+
+- left:
+  - [函数调用具体形式, C]
+  right:
+  - [标识符, ID]
+  - ["("]
+  - [实参列表, APL]
+  - [")"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      if (!auxObj.funTable[symbols.ID.lexeme]) {
+        throw new TranslateError(`没有 ${symbols.ID.lexeme}(...) 函数`);
+      }
+
+      symbols.C.funLabel = auxObj.funTable[symbols.ID.lexeme].label;
+      symbols.C.argList = symbols.APL.argList;
+      
+      if (auxObj.currFunc) {
+        auxObj.currFunc.maxSubArgSize = Math.max(auxObj.currFunc.maxSubArgSize, symbols.C.argList.length);
+      } else {
+        throw new TranslateError("没有在函数体内调用函数??");
+      }
+    }
+  '
+
+- left:
+  - [实参列表, APL]
+  right:
+  - [或级表达式, E]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.exprize(symbols.E);
+
+      symbols.APL.argList = [symbols.E];
+    }
+  '
+
+- left:
+  - [实参列表, APL]
+  right:
+  - [实参列表, APL1]
+  - [","]
+  - [或级表达式, E]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.exprize(symbols.E);
+
+      symbols.APL.argList = symbols.APL1.argList.concat([symbols.E]);
+      symbols.APL1.argList = null;   /*  释放内存 */
+    }
+  '
+
+- left:
+  - [记录下一指令编号动作, M]
+  right: []
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.M.quadNo = auxObj.quads.length;
+    }
+  '
+
+- left:
+  - [跳转待填地址动作, N]
+  right: []
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.emitJ("to_be_filled");
+      symbols.N.nextlist = [auxObj.quads[auxObj.quads.length - 1]];
+    }
+  '
+
+- left:
+  - [或级表达式, B]
+  right:
+  - [或级表达式, B1]
+  - [表达式布尔化动作, A1]
+  - ["||"]
+  - [记录下一指令编号动作, M]
+  - [与级表达式, B2]
+  - [表达式布尔化动作, A2]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.backpatch(symbols.B1.falselist, symbols.M.quadNo);
+      symbols.B.truelist = symbols.B1.truelist.concat(symbols.B2.truelist);
+      symbols.B.falselist = symbols.B2.falselist;
+    }
+  '
+
+- left:
+  - [或级表达式, B]
+  right:
+  - [与级表达式, B1]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.B.addr = symbols.B1.addr;
+      symbols.B.truelist = symbols.B1.truelist;
+      symbols.B.falselist = symbols.B1.falselist;
+    }
+  '
+
+- left:
+  - [与级表达式, B]
+  right:
+  - [与级表达式, B1]
+  - [表达式布尔化动作, A1]
+  - ["&&"]
+  - [记录下一指令编号动作, M]
+  - [rel级表达式, B2]
+  - [表达式布尔化动作, A2]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.backpatch(symbols.B1.truelist, symbols.M.quadNo);
+      symbols.B.falselist = symbols.B1.falselist.concat(symbols.B2.falselist);
+      symbols.B.truelist = symbols.B2.truelist;
+    }
+  '
+
+- left:
+  - [与级表达式, B]
+  right:
+  - [rel级表达式, B1]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.B.addr = symbols.B1.addr;
+      symbols.B.truelist = symbols.B1.truelist;
+      symbols.B.falselist = symbols.B1.falselist;
+    }
+  '
+
+- left:
+  - [rel级表达式, B]
+  right:
+  - [加减级表达式, E1]
+  - [rel, REL]
+  - [加减级表达式, E2]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.exprize(symbols.E1);
+      auxObj.exprize(symbols.E2);
+
+      auxObj.emit({
+        op: "IF" + symbols.REL.passedLexeme + "J",
+        arg1: symbols.E1.addr,
+        arg2: symbols.E2.addr,
+        result: "to_be_filled"
+      });
+
+      auxObj.emitJ("to_be_filled");
+      
+      symbols.B.truelist  = [auxObj.quads[auxObj.quads.length - 2]];
+      symbols.B.falselist = [auxObj.quads[auxObj.quads.length - 1]];
+      
+    }
+  '
+
+- left:
+  - [rel级表达式, B]
+  right:
+  - [加减级表达式, E]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.B.addr = symbols.E.addr;
+      symbols.B.truelist = symbols.E.truelist;
+      symbols.B.falselist = symbols.E.falselist;
+      
+    }
+  '
+
+- left:
+  - [rel, REL]
+  right:
+  - ["<", O]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.REL.passedLexeme = symbols.O.lexeme;
+    }
+  '
+
+- left:
+  - [rel, REL]
+  right:
+  - [">", O]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.REL.passedLexeme = symbols.O.lexeme;
+    }
+  '
+
+- left:
+  - [rel, REL]
+  right:
+  - ["<=", O]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.REL.passedLexeme = symbols.O.lexeme;
+    }
+  '
+
+- left:
+  - [rel, REL]
+  right:
+  - [">=", O]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.REL.passedLexeme = symbols.O.lexeme;
+    }
+  '
+
+- left:
+  - [rel, REL]
+  right:
+  - ["==", O]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.REL.passedLexeme = symbols.O.lexeme;
+    }
+  '
+
+- left:
+  - [rel, REL]
+  right:
+  - ["!=", O]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.REL.passedLexeme = symbols.O.lexeme;
+    }
+  '
+
+- left:
+  - [加减级表达式, E]
+  right:
+  - [加减级表达式, E1]
+  - [加减运算符, O]
+  - [项, T] # 乘除级表达式
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.exprize(symbols.E1);
+      auxObj.exprize(symbols.T);
+
+      symbols.E.addr = auxObj.newTempAddr();
+      
+      auxObj.emit({
+        op: symbols.O.passedLexeme,
+        result: symbols.E.addr,
+        arg1: symbols.E1.addr,
+        arg2: symbols.T.addr
+      });
+      
+    }
+  '
+
+- left:
+  - [加减级表达式, E]
+  right:
+  - [项, T]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.E.addr = symbols.T.addr;
+      symbols.E.truelist = symbols.T.truelist;
+      symbols.E.falselist = symbols.T.falselist;
+      
+    }
+  '
+
+- left:
+  - [加减运算符, O]
+  right:
+  - ["+", PO]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.O.passedLexeme = symbols.PO.lexeme;
+    }
+  '
+
+- left:
+  - [加减运算符, O]
+  right:
+  - ["-", MO]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.O.passedLexeme = symbols.MO.lexeme;
+    }
+  '
+
+- left:
+  - [项, T]
+  right:
+  - [项, T1]
+  - [乘除运算符, O]
+  - [非级表达式, B]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.exprize(symbols.T1);
+      auxObj.exprize(symbols.B);
+
+      symbols.T.addr = auxObj.newTempAddr();
+      
+      auxObj.emit({
+        op: symbols.O.passedLexeme,
+        result: symbols.T.addr,
+        arg1: symbols.T1.addr,
+        arg2: symbols.B.addr
+      });
+      
+    }
+  '
+
+- left:
+  - [项, T]
+  right:
+  - [非级表达式, B]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.T.addr = symbols.B.addr;
+      symbols.T.truelist = symbols.B.truelist;
+      symbols.T.falselist = symbols.B.falselist;
+      
+    }
+  '
+
+- left:
+  - [乘除运算符, O]
+  right:
+  - ["*", MO]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.O.passedLexeme = symbols.MO.lexeme;
+    }
+  '
+
+- left:
+  - [乘除运算符, O]
+  right:
+  - ["/", MO]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.O.passedLexeme = symbols.MO.lexeme;
+    }
+  '
+
+- left:
+  - [非级表达式, B]
+  right:
+  - ["true"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.emitJ("to_be_filled");
+      
+      symbols.B.truelist  = [auxObj.quads[auxObj.quads.length - 1]];
+      symbols.B.falselist = [];
+      
+    }
+  '
+
+- left:
+  - [非级表达式, B]
+  right:
+  - ["false"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.emitJ("to_be_filled");
+      
+      symbols.B.falselist  = [auxObj.quads[auxObj.quads.length - 1]];
+      symbols.B.truelist = [];
+      
+    }
+  '
+
+- left:
+  - [非级表达式, B]
+  right:
+  - ["!"]
+  - [非级表达式, B1]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.boolize(symbols.B1);
+
+      symbols.B.truelist = symbols.B1.falselist;
+      symbols.B.falselist = symbols.B1.truelist;
+    }
+  '
+
+- left:
+  - [非级表达式, E]
+  right:
+  - ["-"]
+  - [非级表达式, E1]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.exprize(symbols.E1);
+
+      symbols.E.addr = auxObj.newTempAddr();
+      
+      auxObj.emit({
+        op: "-",
+        result: symbols.E.addr,
+        arg1: 0,
+        arg2: symbols.E1.addr
+      });
+    }
+  '
+
+- left:
+  - [非级表达式, E]
+  right:
+  - ["+"]
+  - [非级表达式, E1]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      auxObj.exprize(symbols.E1);
+
+      symbols.E.addr = symbols.E1.addr;
+    }
+  '
+
+- left:
+  - [非级表达式, B]
+  right:
+  - [因子, F]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.B.addr = symbols.F.addr;
+      symbols.B.truelist = symbols.F.truelist;
+      symbols.B.falselist = symbols.F.falselist;
+      
+    }
+  '
+
+- left:
+  - [因子, F]
+  right:
+  - [整数, I]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.F.addr = symbols.I.val;
+      
+    }
+  '
+
+- left:
+  - [因子, F]
+  right:
+  - ["("]
+  - [或级表达式, E]
+  - [")"]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.F.addr = symbols.E.addr;
+      symbols.F.truelist = symbols.E.truelist;
+      symbols.F.falselist = symbols.E.falselist;
+      
+    }
+  '
+
+- left:
+  - [因子, F]
+  right:
+  - [标识符, ID]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.F.addr = auxObj.findSymbol(symbols.ID.lexeme);
+      
+    }
+  '
+
+- left:
+  - [因子, F]
+  right:
+  - [函数调用, C]
+  action: !<tag:yaml.org,2002:js/function> '
+    function(obj) {
+      let {symbols, auxObj} = obj;
+
+      symbols.F.addr = auxObj.newTempAddr();
+      
+      auxObj.emit({
+        op: "=",
+        result: symbols.F.addr,
+        arg1: auxObj.makeAddr("register", "v0")
+      });
+      
     }
   '

@@ -1,6 +1,6 @@
 class State {
   constructor (obj) {
-    this.name = "(Unnamed State)";
+    this.name = "<Unnamed State>";
     this.accept = false;
     this.delta = {'': []};
 
@@ -10,8 +10,12 @@ class State {
       }
   }
 
-  static merge(/** @type{Set} */states) {
-    let ns = new State({});
+  toString() {
+    return this.name;
+  }
+
+  static merge(StateClass, /** @type{Set} */states) {
+    let ns = new StateClass({});
     let newName = new Array();
 
     for (let state of states) {
@@ -19,7 +23,7 @@ class State {
     }
 
     if (newName.length !== 0) {
-      ns.name = newName.join("|");
+      ns.name = newName.join("\t");
     } else {
       ns.name = "_empty";
     }
@@ -39,25 +43,4 @@ class State {
   }
 }
 
-class LRItemState extends State {
-  constructor (obj) {
-    super(obj);
-
-    this.lrItems = new Set();
-  }
-
-  static merge(...lrItemStates) {
-    /** @type {LRItemState} */
-    let ns = super.merge(lrItemStates);
-    ns.lrItems = new Set();
-    
-    for (let state of lrItemStates) {
-      for (let item of state.lrItems) {
-        ns.lrItems.add(item);
-      }
-    }
-  }
-}
-
 module.exports.State = State;
-module.exports.LRItemState = LRItemState;
