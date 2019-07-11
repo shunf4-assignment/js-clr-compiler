@@ -1,7 +1,7 @@
 const { EventEmitter } = require("events");
 const { IOEnd } = require("./errors");
 const wait = require('wait-for-stuff');
-const sleep = require('sleep');
+// const sleep = require('sleep');
 
 // Wrap an EventEmitter that may emit multiple types of events to emit only one type of event
 // for co-operation with wait-for-stuff
