@@ -163,14 +163,17 @@ class CLRTranslatorGenerator {
   }
 
   generate() {
-    let grammarFileName = "grammar.txt";
-    let utf8BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
-    fs.writeFile(grammarFileName, Buffer.concat([utf8BOM, Buffer.from(this.grammar.toString(), "utf8")]), function(err) {
-      if (err) {
-          logger.error(err);
-      }
-      logger.notice("文法产生式列表已经写入 " + grammarFileName + ".");
-    });
+    let grammarFileName = this.config.grammarOutputFilePath;
+
+    if (grammarFileName) {
+      let utf8BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
+      fs.writeFile(grammarFileName, Buffer.concat([utf8BOM, Buffer.from(this.grammar.toString(), "utf8")]), function(err) {
+        if (err) {
+          throw err;
+        }
+        logger.notice("文法产生式列表已经写入 " + grammarFileName + ".");
+      });
+    }
 
     let clrItems = [];
     let statesList = this.makeCLRItemStates(clrItems);
@@ -178,14 +181,18 @@ class CLRTranslatorGenerator {
     let dfa = this.makeDFA(statesList);
 
     let table = CLRTable.fromGrammarAndDFA(this.grammar, dfa);
-    let utf16leBOM = Buffer.from([0xFF, 0xFE]);
-    let clrFileName = "CLRTable.csv";
-    fs.writeFile(clrFileName, Buffer.concat([utf16leBOM, Buffer.from(table.toString(), "utf16le")]), function(err) {
-      if (err) {
-          logger.error(err);
-      }
-      logger.notice("LR 分析表已经写入 " + clrFileName + ", 请用 Microsoft Office Excel 打开.");
-    });
+    
+    let clrFileName = this.config.clrTableOutputFilePath;
+
+    if (clrFileName) {
+      let utf16leBOM = Buffer.from([0xFF, 0xFE]);
+      fs.writeFile(clrFileName, Buffer.concat([utf16leBOM, Buffer.from(table.toString(), "utf16le")]), function(err) {
+        if (err) {
+          throw err;
+        }
+        logger.notice("LR 分析表已经写入 " + clrFileName + ", 请用 Microsoft Office Excel 打开.");
+      });
+    }
 
     let result = new CLRTranslator(this.grammar, table, null);
     return result;

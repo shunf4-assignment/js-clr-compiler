@@ -21,6 +21,7 @@ class CLRTranslator {
     this.auxObj = grammar.auxObj;
     this.clrTable = clrTable;
     this.lexer = lexer;
+    this.analysisStepsOutputFilePath = null;
   }
 
   reset() {
@@ -158,6 +159,8 @@ class CLRTranslator {
 
     let err = null;
 
+    this.auxObj.reset();
+
     let doAnalyze = () => {
       for (;;) {
 
@@ -250,7 +253,6 @@ class CLRTranslator {
         let quad = this.auxObj.quads[i];
         logger.notice(i + ".\t" + quad.toString());
       }
-
     }
 
     if (debug) {
@@ -263,18 +265,23 @@ class CLRTranslator {
       }
     }
 
-    let utf16leBOM = Buffer.from([0xFF, 0xFE]);
-    let fileName = "Analysis.csv";
-    fs.writeFile(fileName, Buffer.concat([utf16leBOM, Buffer.from("序号\t状态栈\t符号栈\t下一词法单元\t动作\n", "utf16le"), Buffer.from(this.analysisSteps.join("\n"), "utf16le")]), function(err) {
-      if (err) {
-          logger.error(err);
-      }
-      logger.notice("分析过程已经写入 " + fileName + ", 请用 Microsoft Office Excel 打开.");
-    });
+    let fileName = this.analysisStepsOutputFilePath;
+
+    if (fileName) {
+      let utf16leBOM = Buffer.from([0xFF, 0xFE]);
+      fs.writeFile(fileName, Buffer.concat([utf16leBOM, Buffer.from("序号\t状态栈\t符号栈\t下一词法单元\t动作\n", "utf16le"), Buffer.from(this.analysisSteps.join("\n"), "utf16le")]), function(err) {
+        if (err) {
+          throw err;
+        }
+        logger.notice("分析过程已经写入 " + fileName + ", 请用 Microsoft Office Excel 打开.");
+      });
+    }
 
     if (err) {
       throw err;
     }
+
+    return { quads: this.auxObj.quads, globalSymTable: this.auxObj.symTables[0] };
   }
 
 }

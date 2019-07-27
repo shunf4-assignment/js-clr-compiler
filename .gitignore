@@ -30,3 +30,8 @@ node_modules/
 
 test.js
 ~*
+
+logs/**
+output/**
+bin/
+!.gitkeep

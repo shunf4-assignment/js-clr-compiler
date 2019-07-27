@@ -1,14 +1,14 @@
 module.exports = {
-  sourceFileName: "testsource1.txt",
+  sourceFileName: "test_sources/testsource1.txt",
   asGBKInsteadOfUtf8: true,
 
   lexerConfig: "lex/lex-c-style.yaml",
   translatorConfig: "translate/grammar-c-style.yaml",
 
   consoleLevel: "notice",
-  debugFileName: "debug.log",
+  debugFilePath: "logs/debug.log",
   debugLevel: "info",
-  exceptionFileName: "exception.log",
+  exceptionFilePath: "logs/exception.log",
   exceptionLevel: "error",
   askIfConflict: true,
   forceOverwrite: true,

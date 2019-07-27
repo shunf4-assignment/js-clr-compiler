@@ -51,11 +51,16 @@ lexer.getMoreChar = () => syncSourceStreamEmitter.readPartSync();
 var translatorGenConfig = yaml.load(fs.readFileSync(myConfig.translatorConfig, "utf8"));
 
 var translatorGen = new CLRTranslatorGenerator();
+translatorGenConfig.clrTableOutputFilePath = "output/CLRTable.csv";
+translatorGenConfig.grammarOutputFilePath = "output/CLRTable.csv";
 translatorGen.config = translatorGenConfig;
 
 var translator = translatorGen.generate();
 translator.lexer = lexer;
+translator.analysisStepsOutputFilePath = "output/Analysis.csv";
 
-translator.analyze();
+// 启用翻译器
 
-logger.notice(`请到 ${myConfig.debugFileName} 查看调试信息, 到 ${myConfig.exceptionFileName} 查看异常信息.`);
+var { quads, globalSymTable } = translator.analyze();
+
+logger.notice(`请到 ${myConfig.debugFilePath} 查看调试信息, 到 ${myConfig.exceptionFilePath} 查看异常信息.`);

@@ -22,12 +22,23 @@ name: 类C文法
 
 auxObj:
 # 每重新开始分析一个源文件最好 reset 一次
+  reset: !<tag:yaml.org,2002:js/function> '
+    function() {
+      this.quads = [];
+      this.symTables = [{ "global": true, "currOffset": 0, "symbols": {}}];
+      this.labelNo = 0;
+      this.tempNo = 0;
+      this.funTable = {};
+      this.currFunc = null;
+      this.argEnv = null;
+    }
+  '
+
   quads: []
   symTables: [{ "global": true, "currOffset": 0, "symbols": {}}]
   labelNo: 0
   tempNo: 0
   funTable: {}
-  glbDataOffset: 0
   currFunc: null
   
   argEnv: null
@@ -189,6 +200,7 @@ auxObj:
 
   boolize: !<tag:yaml.org,2002:js/function> '
     function(symbol) {
+      "将 symbol 布尔化(使其拥有 truelist 和 falselist)";
       if (symbol.truelist === undefined) {
         this.emit({
           op: "IF!=J",
@@ -208,6 +220,7 @@ auxObj:
 
   exprize: !<tag:yaml.org,2002:js/function> '
     function(symbol) {
+      "将 symbol 表达式化(使其得出值, 并存于一个临时地址)";
       if (symbol.addr === undefined) {
         symbol.addr = this.newTempAddr();
         this.emit({
@@ -293,7 +306,7 @@ productions:
 
       symbols.P.labelSize = auxObj.labelNo;
       symbols.P.tempSize = auxObj.tempNo;
-      symbols.P.glbDataSize = auxObj.glbDataOffset;
+      symbols.P.glbDataSize = auxObj.symTables[0].currOffset;
     }
   '
 
@@ -349,9 +362,9 @@ productions:
       auxObj.symTables[0].symbols[symbols.ID.lexeme] = {
         name: symbols.ID.lexeme,
         type: symbols.T.passedLexeme,
-        offset: auxObj.glbDataOffset
+        offset: auxObj.symTables[0].currOffset
       };
-      auxObj.glbDataOffset += 4;
+      auxObj.symTables[0].currOffset += 4;
     }
   '
 
@@ -481,10 +494,11 @@ productions:
       let funIdSymbol = lrStack[lrStack.length - 4];  /*  指上面的上面那个声明产生式右边的"标识符" */
       let funTypeSymbol = lrStack[lrStack.length - 5];/*  指上面的上面那个声明产生式右边的"函数返回值类型" */
 
-      let label = auxObj.newLabel();
+      /* let label = auxObj.newLabel(); */
+      let label = auxObj.makeLabel(funIdSymbol.lexeme);
 
       if (auxObj.funTable[funIdSymbol.lexeme]) {
-        throw new TranslateError(`重载了函数 ${funIdSymbol.lexeme}`);
+        throw new TranslateError(`函数有重名: ${funIdSymbol.lexeme}`);
       }
 
       /*  argList: symDesc 类型的数组, 按参数从左到右顺序排 */
@@ -505,8 +519,6 @@ productions:
       auxObj.funTable[funIdSymbol.lexeme] = auxObj.currFunc;
 
       auxObj.emitLabel(label);
-
-      auxObj.emitLabel(auxObj.makeLabel(funIdSymbol.lexeme));
 
       let funBeginOp = {
         op: "FUN_BEGIN",
