@@ -247,12 +247,6 @@ class CLRTranslator {
       logger.info("语法树如下:");
       logger.info("\n" + this.parseTree.toString());
       logger.notice("语法分析成功.");
-
-      logger.notice("四元式序列如下: ");
-      for (let i = 0; i < this.auxObj.quads.length; i++) {
-        let quad = this.auxObj.quads[i];
-        logger.notice(i + ".\t" + quad.toString());
-      }
     }
 
     if (debug) {
@@ -281,7 +275,9 @@ class CLRTranslator {
       throw err;
     }
 
-    return { quads: this.auxObj.quads, globalSymTable: this.auxObj.symTables[0] };
+    this.auxObj.globalSymTable = this.auxObj.symTables[0];
+
+    return this.auxObj;
   }
 
 }

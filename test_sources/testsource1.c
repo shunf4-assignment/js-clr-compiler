@@ -15,7 +15,7 @@ int program(int a,int b,int c)
 	}
 	while(i<=100)
 	{
-		i=j*2;
+		i=(i<=100)+i+j*2;
 	}
 	return i;
 }
@@ -26,14 +26,13 @@ int demo(int a)
 	return a*2;
 }
 
-void main(void)
+int main(void)
 {
-	int a;
 	int b;
 	int c;
 	a=3;
 	b=4;
 	c=2;
 	a=program(a,b,demo(c));
-	return;
+	return a;
 }

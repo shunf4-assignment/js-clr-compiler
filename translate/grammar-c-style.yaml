@@ -12,9 +12,10 @@ name: 类C文法
 
 # 栈帧 = 局部变量(m个字)
 # + 用于对齐 8 字节的补白(0或1个字)
-# + 寄存器: (从栈底到栈顶, 16个字)
+# + 寄存器: (从栈底到栈顶, 16个字, 暂不用)
 #   v0, v1, s0, s1, s2, s3, s4, s5,s6, s7, kt0, kt1, gp, s8, sp, ra
-# + 为下一个函数调用准备的参数构造区(n个字,n至少为4,取决于该函数调用了哪些函数).
+# + 临时变量
+# + 为下一个函数调用准备的参数构造区(n个字,n至少为4,取决于该函数调用了哪些函数) (只有当准备调用时才移动栈顶指针分配).
 
 # m和n的大小未知,所以只能在函数体分析完毕时知道函数栈帧大小, 进而回填到函数开头分配栈帧的指令. 又因n的大小未知, 每个变量的地址也只能是相对的, 要等n得出之后再整体加上n.
 
@@ -62,6 +63,22 @@ auxObj:
       }
     '
 
+  SymDescPrototype:
+    name: null
+    type: null
+    offset: 0
+
+    toString: !<tag:yaml.org,2002:js/function> '
+      function() {
+        let result = "< ";
+        result += this.type;
+        result += " \"";
+        result += this.name;
+        result += "\"   " + this.offset + " >";
+        return result;
+      }
+    '
+
   AddressPrototype:
     type: ""  # global, bp(relative to $sp-frameSize), sp(relative to $sp), temp, register
     value: 0  # for temp: index of tempvar; otherwise: offset
@@ -105,6 +122,16 @@ auxObj:
     }
   '
 
+  makeSymDesc: !<tag:yaml.org,2002:js/function> '
+    function(sprout) {
+      let ret = Object.create(this.SymDescPrototype);
+      if (sprout) {
+        Object.assign(ret, sprout);
+      }
+      return ret;
+    }
+  '
+
   newTempAddr: !<tag:yaml.org,2002:js/function> '
     function() {
       return this.makeAddr("temp", this.tempNo++);
@@ -121,28 +148,23 @@ auxObj:
     function() {
       /* return "L" + this.labelNo++; */
       /* return ["LABEL", this.labelNo++]; */
-      let labelQuad = this.makeQuad({
-        op: "LABEL",
-        result: "L" + this.labelNo++
-      });
-
-      return labelQuad;
+      return "L" + this.labelNo++;
     }
   '
 
   makeLabel: !<tag:yaml.org,2002:js/function> '
     function(labelName) {
-      return this.makeQuad({
-        op: "LABEL",
-        result: labelName
-      });
+      return labelName;
     }
   '
 
   emitLabel: !<tag:yaml.org,2002:js/function> '
     function(lbl) {
       /* this.quads.push(lbl + ":"); */
-      this.quads.push(lbl);
+      this.quads.push(this.makeQuad({
+        op: "LABEL",
+        result: lbl
+      }));
     }
   '
 
@@ -151,10 +173,10 @@ auxObj:
       /* this.quads.push("J " + lbl); */
       /* this.quads.push(["JUMP", lbl]); */
 
-      /*  lblOrQuadNo 如果是 label 就是字符串, 如果是四元式序号那就是数字 */
+      /*  lblOrQuadNo 如果是 label 就是字符串, 如果是四元式序号那就是 quad 类型的 addr */
       let quad = this.makeQuad({
         op: "JUMP",
-        result: lblOrQuadNo
+        result: typeof(lblOrQuadNo) === "string" ? lblOrQuadNo : this.makeAddr("quad", lblOrQuadNo)
       });
       this.quads.push(quad);
       return quad;
@@ -179,7 +201,7 @@ auxObj:
           throw new Error("this quad is not a JUMP quad");
         }
 
-        quad.result = quadNo;
+        quad.result = this.makeAddr("quad", quadNo);
       }
     }
   '
@@ -187,10 +209,11 @@ auxObj:
   findSymbol: !<tag:yaml.org,2002:js/function> '
     function(symbolStr) {
       let symTableInd = this.symTables.length - 1;
+
       for (; symTableInd >= 0; symTableInd--) {
         let currSymTable = this.symTables[symTableInd];
         if (currSymTable.symbols[symbolStr]) {
-          return this.makeAddr(currSymTable.global ? "global" : "bp", currSymTable.symbols[symbolStr].offset);  
+          return currSymTable.global ? this.makeAddr("global", symbolStr) : this.makeAddr("bp", - currSymTable.symbols[symbolStr].offset);  
         }
       }
 
@@ -359,11 +382,11 @@ productions:
         throw new TranslateError(`重声明: ${symbols.ID.lexeme}`);
       }
 
-      auxObj.symTables[0].symbols[symbols.ID.lexeme] = {
+      auxObj.symTables[0].symbols[symbols.ID.lexeme] = auxObj.makeSymDesc({
         name: symbols.ID.lexeme,
         type: symbols.T.passedLexeme,
         offset: auxObj.symTables[0].currOffset
-      };
+      });
       auxObj.symTables[0].currOffset += 4;
     }
   '
@@ -391,6 +414,17 @@ productions:
 
       /* 我们在这不检查 int () 函数是否曾使用 return 返回一个值了. 当用户没有返回值时, 该函数调用的返回值为未定义 */
 
+      /*  恢复 Return Addr 到寄存器 */
+      let restoreRAOp = {
+        op: "=",
+        result: auxObj.makeAddr("register", "ra"),
+        arg1: "return_address_offset_to_be_filled"
+      };
+
+      restoreRAOp = auxObj.emit(restoreRAOp);
+
+      auxObj.currFunc.fillReturnAddr.push(restoreRAOp);
+
       /*  弹出栈帧 */
       let popFrameOp = {
         op: "+",
@@ -403,28 +437,25 @@ productions:
 
       auxObj.currFunc.fillFrameSize.push(popFrameOp);
 
-      /*  恢复 Return Addr 到寄存器 */
-      let restoreRAOp = {
-        op: "=",
-        result: auxObj.makeAddr("register", "ra"),
-        arg1: "return_address_offset_to_be_filled"
-      };
-
-      restoreRAOp = auxObj.emit(restoreRAOp);
-
-      auxObj.currFunc.fillReturnAddr.push(restoreRAOp);
-
       /*  返回 */
-      auxObj.emit({
-        op: "JUMP",
-        result: auxObj.makeAddr("register", "ra")
-      });
+      if (auxObj.currFunc.name === "main") {
+        auxObj.emit({
+          op: "BREAK"
+        });
+      } else {
+        auxObj.emit({
+          op: "JUMP",
+          result: auxObj.makeAddr("register", "ra")
+        });
+      }
 
 
 
       /*  回填 frameSize(栈帧大小, 函数开始声明四元式 FUN_START 用), returnAddrAddr(用来指示 returnAddr 在内存的存放地址) */
 
-      let frameSize = auxObj.currFunc.localVarSize + (auxObj.currFunc.localVarSize / 4 % 2 * 4) + 4 + Math.max(auxObj.currFunc.maxSubArgSize, 4) * 4;
+      /* let frameSize = auxObj.currFunc.localVarSize + ((auxObj.currFunc.localVarSize / 4 % 2 ^ 1) * 4) + 4 + Math.max(auxObj.currFunc.maxSubArgSize, 4) * 4; */
+
+      let frameSize = auxObj.currFunc.localVarSize + ((auxObj.currFunc.localVarSize / 4 % 2 ^ 1) * 4) + 4;
 
       auxObj.currFunc.fillFrameSize.forEach((op) => {
         if (op.result === "stack_frame_size_to_be_filled") {
@@ -438,7 +469,7 @@ productions:
         }
       });
       
-      let returnAddrAddr = auxObj.makeAddr("bp", auxObj.currFunc.localVarSize + (auxObj.currFunc.localVarSize / 4 % 2 * 4) + 4);
+      let returnAddrAddr = auxObj.makeAddr("bp", - (auxObj.currFunc.localVarSize + ((auxObj.currFunc.localVarSize / 4 % 2 ^ 1) * 4) + 4));
       auxObj.currFunc.fillReturnAddr.forEach((op) => {
         if (op.result === "return_address_offset_to_be_filled") {
           op.result = returnAddrAddr;
@@ -546,19 +577,19 @@ productions:
 
       auxObj.emit({
         op: "=",
-        result: auxObj.makeAddr("bp", -4),
+        result: auxObj.makeAddr("bp", 4),
         arg1: auxObj.makeAddr("register", "a1"),
       });
 
       auxObj.emit({
         op: "=",
-        result: auxObj.makeAddr("bp", -8),
+        result: auxObj.makeAddr("bp", 8),
         arg1: auxObj.makeAddr("register", "a2"),
       });
 
       auxObj.emit({
         op: "=",
-        result: auxObj.makeAddr("bp", -12),
+        result: auxObj.makeAddr("bp", 12),
         arg1: auxObj.makeAddr("register", "a3"),
       });
 
@@ -622,7 +653,7 @@ productions:
         currOffset: 0,
         symbols: {}
       };
-      symbols.AL.argEnv[symbols.SAG.symDesc.name] = symbols.SAG.symDesc;
+      symbols.AL.argEnv.symbols[symbols.SAG.symDesc.name] = symbols.SAG.symDesc;
       symbols.SAG.symDesc.offset = symbols.AL.argEnv.currOffset;
 
       /*  注意, 计算形参地址时是递减 4. 在算局部变量时, 要重置 currOffset 为 4, 并在之后递增4. */
@@ -659,11 +690,11 @@ productions:
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
       let {symbols, auxObj} = obj;
-      symbols.SAG.symDesc = {
+      symbols.SAG.symDesc = auxObj.makeSymDesc({
         name: symbols.ID.lexeme,
         type: symbols.T.lexeme,
         offset: -1,
-      }
+      });
     }
   '
 
@@ -765,12 +796,11 @@ productions:
     function(obj) {
       let {symbols, auxObj} = obj;
       
-      let symDesc = {
+      let symDesc = auxObj.makeSymDesc({
         name: symbols.ID.lexeme,
         type: symbols.T.lexeme,
-        /* offset: auxObj.symTablesTop().currOffset */
-        offset: auxObj.currFunc.localVarSize
-      };
+        offset: auxObj.symTablesTop().currOffset
+      });
       if (auxObj.symTablesTop().symbols[symDesc.name]) {
         throw new TranslateError(`重定义了变量 ${symDesc.name}`);
       }
@@ -868,6 +898,17 @@ productions:
         arg1: symbols.E.addr
       });
 
+      /*  恢复 Return Addr 到寄存器 */
+      let restoreRAOp = {
+        op: "=",
+        result: auxObj.makeAddr("register", "ra"),
+        arg1: "return_address_offset_to_be_filled"
+      };
+
+      restoreRAOp = auxObj.emit(restoreRAOp);
+
+      auxObj.currFunc.fillReturnAddr.push(restoreRAOp);
+
       /*  弹出栈帧 */
       let popFrameOp = {
         op: "+",
@@ -880,22 +921,17 @@ productions:
 
       auxObj.currFunc.fillFrameSize.push(popFrameOp);
 
-      /*  恢复 Return Addr 到寄存器 */
-      let restoreRAOp = {
-        op: "=",
-        result: auxObj.makeAddr("register", "ra"),
-        arg1: "return_address_offset_to_be_filled"
-      };
-
-      restoreRAOp = auxObj.emit(restoreRAOp);
-
-      auxObj.currFunc.fillReturnAddr.push(restoreRAOp);
-
       /*  返回 */
-      auxObj.emit({
-        op: "JUMP",
-        result: auxObj.makeAddr("register", "ra")
-      });
+      if (auxObj.currFunc.name === "main") {
+        auxObj.emit({
+          op: "BREAK"
+        });
+      } else {
+        auxObj.emit({
+          op: "JUMP",
+          result: auxObj.makeAddr("register", "ra")
+        });
+      }
 
       symbols.S.nextlist = [];
     }
@@ -938,10 +974,16 @@ productions:
       auxObj.currFunc.fillReturnAddr.push(restoreRAOp);
 
       /*  返回 */
-      auxObj.emit({
-        op: "JUMP",
-        result: auxObj.makeAddr("register", "ra")
-      });
+      if (auxObj.currFunc.name === "main") {
+        auxObj.emit({
+          op: "BREAK"
+        });
+      } else {
+        auxObj.emit({
+          op: "JUMP",
+          result: auxObj.makeAddr("register", "ra")
+        });
+      }
 
       symbols.S.nextlist = [];
     }
@@ -1057,16 +1099,23 @@ productions:
           auxObj.emit({
             op: "=",
             result: auxObj.makeAddr("register", "a" + i),   /*  开始放 a0 - a3 寄存器 */
-            arg1: currArg.addr
+            arg1: currArg.addr,
           });
         } else {
           auxObj.emit({
-            op: "=",
-            result: auxObj.makeAddr("sp", i * 4),   /*  a4 及以上, 放内存 */
-            arg1: currArg.addr
+            op: "PASSARG",
+            result: auxObj.makeAddr("arg", i),   /*  a4 及以上, 放内存 */
+            arg1: currArg.addr,
+            arg2: Math.max(symbols.C.argList.length, 4)
           });
         }
       }
+
+      /*  在栈上为参数分配空间 */
+      auxObj.emit({
+        op: "ALLOCARGS",
+        arg1: Math.max(symbols.C.argList.length, 4)
+      });
 
       auxObj.emit({
         op: "JUMP_AND_LINK",
@@ -1075,6 +1124,12 @@ productions:
       });
 
       /*  在跳转回来时, v0 寄存器应存返回值 */
+
+      /*  回收栈上为参数分配的空间 */
+      auxObj.emit({
+        op: "RELEASEARGS",
+        arg1: Math.max(symbols.C.argList.length, 4)
+      });
     }
   '
 

@@ -1,5 +1,5 @@
 module.exports = {
-  sourceFileName: "test_sources/testsource1.txt",
+  sourceFileName: "test_sources/testsource1.c",
   asGBKInsteadOfUtf8: true,
 
   lexerConfig: "lex/lex-c-style.yaml",
@@ -7,6 +7,8 @@ module.exports = {
 
   consoleLevel: "notice",
   debugFilePath: "logs/debug.log",
+  outputFilePath: "output/output.txt",
+  asmPath: "output/output.asm",
   debugLevel: "info",
   exceptionFilePath: "logs/exception.log",
   exceptionLevel: "error",

@@ -13,6 +13,7 @@ const { Token } = require("./common/Token");
 const { LexerGenerator } = require("./lex/LexerGenerator");
 const { LexError, TranslateError } = require("./common/errors");
 const { CLRTranslatorGenerator } = require("./translate/CLRTranslatorGenerator");
+const { CStyleCodeGenerator } = require("./codegen/CStyleCodeGenerator");
 
 const { SyncStreamEmitter } = require("./common/SyncStreamEmitter");
 
@@ -59,8 +60,39 @@ var translator = translatorGen.generate();
 translator.lexer = lexer;
 translator.analysisStepsOutputFilePath = "output/Analysis.csv";
 
-// 启用翻译器
+// 启动翻译器
+var auxObj = translator.analyze();
+var quads = auxObj.quads;
+var globalSymTable = auxObj.globalSymTable;
 
-var { quads, globalSymTable } = translator.analyze();
+logger.notice("四元式序列如下: ");
+for (let i = 0; i < quads.length; i++) {
+  let quad = quads[i];
+  logger.notice(i + ".\t" + quad.toString());
+}
 
-logger.notice(`请到 ${myConfig.debugFilePath} 查看调试信息, 到 ${myConfig.exceptionFilePath} 查看异常信息.`);
+logger.notice("全局符号表如下: ");
+for (let symbol of Object.values(globalSymTable.symbols)) {
+  logger.notice(symbol.name + ":\t" + symbol.type + "\t" + symbol.offset);
+}
+
+// 启动临时变量地址分配器
+var instrs = new CStyleCodeGenerator(auxObj).generate(quads);
+
+logger.notice("MIPS 指令如下: ");
+
+let asm = "";
+for (let i = 0; i < instrs.length; i++) {
+  let instr = instrs[i];
+  logger.notice(instr.toString());
+  asm += instr.toString() + "\n";
+}
+
+fs.writeFile(myConfig.asmPath, Buffer.from(asm, "utf8"), function(err) {
+  if (err) {
+    throw err;
+  }
+  logger.notice("MIPS 汇编码已经写入 " + myConfig.asmPath + ", 请用 MARS 打开和编译.");
+});
+
+logger.notice(`请到 ${myConfig.debugFilePath} 查看调试信息, 到 ${myConfig.exceptionFilePath} 查看异常信息, 到 ${myConfig.outputFilePath} 查看输出.`);

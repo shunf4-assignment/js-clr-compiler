@@ -31,7 +31,7 @@ class Token extends Symbol {
   constructor (options) {
     super(options.type);
     for (let prop in options) {
-      this[prop] = options[prop]
+      this[prop] = options[prop];
     }
   }
 

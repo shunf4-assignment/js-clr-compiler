@@ -19,6 +19,13 @@ class TranslateError extends Error {
   }
 }
 
+class CodeGenerationError extends Error {
+  constructor (message) {
+    super(message);
+    this.name = "CodeGenerationError(代码生成错误)";
+  }
+}
+
 class IOEnd extends Error {
   constructor (message) {
     super(message);
@@ -38,3 +45,4 @@ module.exports.DFAInvalidError = DFAInvalidError;
 module.exports.TranslateError = TranslateError;
 module.exports.IOEnd = IOEnd;
 module.exports.NoMoreTokenError = NoMoreTokenError;
+module.exports.CodeGenerationError = CodeGenerationError;

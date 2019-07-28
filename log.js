@@ -24,13 +24,23 @@ tripleBeam.configs.npm.levels = myLevels;
 tripleBeam.configs.npm.colors = myColors;
 const winston = require('winston');
 
-function myInit({consoleLevel, debugFilePath, debugLevel, exceptionFilePath, exceptionLevel}) {
+function myInit({consoleLevel, outputFilePath, debugFilePath, debugLevel, exceptionFilePath, exceptionLevel}) {
   var debugConsole = new winston.transports.Console({
     level: consoleLevel,
     format: winston.format.combine(
       winston.format.colorize(),
       winston.format.printf(({ level, message }) => {
         return `${level}: ${message}`;
+      })
+    )
+  });
+  var outputFile = new winston.transports.File({
+    filename: outputFilePath,
+    level: "notice",
+    options: { flags: 'w' },
+    format: winston.format.combine(
+      winston.format.printf(({ message }) => {
+        return `${message}`;
       })
     )
   });
@@ -71,6 +81,7 @@ function myInit({consoleLevel, debugFilePath, debugLevel, exceptionFilePath, exc
     transports: [
       debugConsole,
       debugFile,
+      outputFile,
       exceptionConsole,
       exceptionFile
     ],
