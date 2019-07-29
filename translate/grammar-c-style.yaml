@@ -210,6 +210,8 @@ auxObj:
     function(symbolStr) {
       let symTableInd = this.symTables.length - 1;
 
+      /* console.log(symbolStr, this.symTablesTop().symbols); */
+
       for (; symTableInd >= 0; symTableInd--) {
         let currSymTable = this.symTables[symTableInd];
         if (currSymTable.symbols[symbolStr]) {
@@ -632,7 +634,11 @@ productions:
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
       let {symbols, auxObj} = obj;
-      symbols.AG.argEnv = null;
+      symbols.AG.argEnv = {
+        global: false,
+        currOffset: 0,
+        symbols: {}
+      };
       symbols.AG.argList = [];
     }
   '
@@ -732,10 +738,10 @@ productions:
         /*  用过一次 argEnv 后要马上置空, 以便函数内部语句块的分析 */
         auxObj.argEnv = null;
       } else {
-        /*  这是一个函数内语句块(或该函数没有参数) */
+        /*  这是一个函数内语句块, 其 currOffset 不生效. 在实际获取 currOffset 时, 上溯至函数顶级语句块获取 currOffset, 因为一个函数内的所有变量都连续在栈上分配地址, 所以 currOffset 要统一 */
         auxObj.symTables.push({
           global: false,
-          currOffset: 4,
+          currOffset: undefined,
           symbols: {}
         });
       }
@@ -795,11 +801,19 @@ productions:
   action: !<tag:yaml.org,2002:js/function> '
     function(obj) {
       let {symbols, auxObj} = obj;
+
+      let latestValidOffsetSymTable = null;
+      for (let i = auxObj.symTables.length - 1; i > 0; i--) {
+        if (auxObj.symTables[i].currOffset !== undefined) {
+          latestValidOffsetSymTable = auxObj.symTables[i];
+          break;
+        }
+      }
       
       let symDesc = auxObj.makeSymDesc({
         name: symbols.ID.lexeme,
         type: symbols.T.lexeme,
-        offset: auxObj.symTablesTop().currOffset
+        offset: latestValidOffsetSymTable.currOffset
       });
       if (auxObj.symTablesTop().symbols[symDesc.name]) {
         throw new TranslateError(`重定义了变量 ${symDesc.name}`);
@@ -809,7 +823,7 @@ productions:
 
       auxObj.symTablesTop().symbols[symDesc.name] = symDesc;
       auxObj.currFunc.localVarSize += 4;
-      auxObj.symTablesTop().currOffset += 4;
+      latestValidOffsetSymTable.currOffset += 4;
     }
   '
 
